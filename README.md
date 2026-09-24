@@ -43,15 +43,16 @@ The mode is always on the status line at the bottom. NORMAL is where you live.
 | Key | What it does |
 |---|---|
 | `hjkl` / arrows | move the brush |
-| `x` | stamp a pixel (the brush doesn't move... stamping is not walking) |
+| `Space` / `r` | stamp a pixel (the brush doesn't move... stamping is not walking) |
+| `x` | erase the pixel(s) under the brush |
 | `i` | PAINT mode: movement draws until you hit `Esc` |
 | `f` | flood fill |
 | `L` / `R` | line / rectangle: move to the second point, `Enter` commits, `Esc` cancels. `Shift+Enter` fills the rect |
-| `v` | select a region, move, `y` yanks it |
+| `v` | select a region, move, `y` yanks it, `d` erases it |
 | `p` | paste: the copy floats at the brush, `Enter` stamps it |
 | `P` | eyedropper: pick up the color under the brush |
 | `e` | eraser toggle |
-| `[` `]` | brush size |
+| `-`/`_` `=`/`+` | brush size down / up |
 | `o` | brush shape, square ↔ circle |
 | `1`–`9`, `0` | palette slots, `Tab` / `Shift+Tab` to flip pages |
 | `u` / `Ctrl+R` | undo / redo |

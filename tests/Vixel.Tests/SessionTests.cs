@@ -40,6 +40,53 @@ public class SessionTests
     }
 
     [Test]
+    public void EraseUnderBrush_clears_pixel_and_is_undoable()
+    {
+        var s = NewSession();
+        s.CursorX = 5;
+        s.CursorY = 5;
+        s.Stamp();
+        Assert.That(s.Canvas[5, 5], Is.EqualTo(0));
+
+        s.EraseUnderBrush();
+        Assert.That(s.Canvas[5, 5], Is.Null);
+
+        s.Undo();
+        Assert.That(s.Canvas[5, 5], Is.EqualTo(0), "undo restores the erased pixel");
+    }
+
+    [Test]
+    public void DeleteRegion_clears_selection_and_returns_to_normal()
+    {
+        var s = NewSession();
+        for (var x = 0; x < 4; x++)
+        {
+            s.CursorX = x;
+            s.CursorY = 2;
+            s.Stamp();
+        }
+
+        s.CursorX = 1;
+        s.CursorY = 2;
+        s.BeginTwoPoint(EditorSession.Mode.Select);
+        s.CursorX = 2;
+        s.CursorY = 2;
+        s.DeleteRegion();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(s.Canvas[0, 2], Is.EqualTo(0), "outside region untouched");
+            Assert.That(s.Canvas[1, 2], Is.Null);
+            Assert.That(s.Canvas[2, 2], Is.Null);
+            Assert.That(s.Canvas[3, 2], Is.EqualTo(0), "outside region untouched");
+            Assert.That(s.CurrentMode, Is.EqualTo(EditorSession.Mode.Normal));
+        });
+
+        s.Undo();
+        Assert.That(s.Canvas[1, 2], Is.EqualTo(0), "undo restores region");
+    }
+
+    [Test]
     public void New_session_names_untitled_not_null()
     {
         // Regression: fresh sessions saved with "name": null (found in smoke test).

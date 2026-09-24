@@ -224,6 +224,22 @@ public sealed class EditorSession
         Dirty = true;
     }
 
+    /// <summary>Erases the brush footprint under the cursor (vi x semantics).</summary>
+    public void EraseUnderBrush()
+    {
+        History.Push(Tools.Stamp(Canvas, CursorX, CursorY, null, BrushSize, CircleBrush));
+        Dirty = true;
+    }
+
+    /// <summary>Erases the selected region (vi d on a visual selection).</summary>
+    public void DeleteRegion()
+    {
+        History.Push(Tools.Rect(Canvas, AnchorX, AnchorY, CursorX, CursorY, null, filled: true));
+        CurrentMode = Mode.Normal;
+        Dirty = true;
+        Message = "deleted region";
+    }
+
     public void Fill()
     {
         History.Push(FloodFill.Fill(Canvas, CursorX, CursorY, EffectiveColor));
@@ -458,7 +474,9 @@ public sealed class CanvasView : View
         else if (key == Key.CursorRight || key == Key.L) _s.Move(1, 0);
         else if (key == Key.CursorUp || key == Key.K) _s.Move(0, -1);
         else if (key == Key.CursorDown || key == Key.J) _s.Move(0, 1);
-        else if (key == Key.X && _s.CurrentMode == EditorSession.Mode.Normal) _s.Stamp();
+        else if (key == Key.X && _s.CurrentMode == EditorSession.Mode.Normal) _s.EraseUnderBrush();
+        else if (key == Key.Space && _s.CurrentMode == EditorSession.Mode.Normal) _s.Stamp();
+        else if (key == Key.R && _s.CurrentMode == EditorSession.Mode.Normal) _s.Stamp();
         else if (key == Key.F && _s.CurrentMode == EditorSession.Mode.Normal) _s.Fill();
         else if (key == Key.I && _s.CurrentMode == EditorSession.Mode.Normal) _s.EnterPaint();
         else if (key == Key.Esc) { if (_s.CurrentMode == EditorSession.Mode.Paint) _s.ExitPaint(); else _s.CancelMode(); }
@@ -469,6 +487,7 @@ public sealed class CanvasView : View
         else if (key == Key.R.WithShift && _s.CurrentMode == EditorSession.Mode.Normal) _s.BeginTwoPoint(EditorSession.Mode.Rect);
         else if (key == Key.V && _s.CurrentMode == EditorSession.Mode.Normal) _s.BeginTwoPoint(EditorSession.Mode.Select);
         else if (key == Key.P && _s.CurrentMode == EditorSession.Mode.Select) { _s.CommitTwoPoint(); }
+        else if (key == Key.D && _s.CurrentMode == EditorSession.Mode.Select) { _s.DeleteRegion(); }
         else if (key == Key.Y && _s.CurrentMode == EditorSession.Mode.Select) { _s.CommitTwoPoint(); }
         else if (key == Key.P && _s.CurrentMode == EditorSession.Mode.Normal && _s.Clipboard is not null) _s.BeginTwoPoint(EditorSession.Mode.Paste);
         else if (key == Key.Enter && _s.CurrentMode is EditorSession.Mode.Line or EditorSession.Mode.Rect or EditorSession.Mode.Paste) _s.CommitTwoPoint();
@@ -477,9 +496,8 @@ public sealed class CanvasView : View
         else if (key == Key.R.WithCtrl && _s.CurrentMode == EditorSession.Mode.Normal) _s.Redo();
         else if (key.TryGetPrintableRune(out var colon) && colon.Value == ':') { _s.CurrentMode = EditorSession.Mode.Command; _s.CommandBuffer = ""; _s.CommandCursor = 0; }
         else if (key.TryGetPrintableRune(out var digit) && digit.Value >= '1' && digit.Value <= '9') SetPaletteSlot(digit.Value - '1');
-        else if (key.TryGetPrintableRune(out var zero) && zero.Value == '0') SetPaletteSlot(9);
-        else if (key.TryGetPrintableRune(out var openBracket) && openBracket.Value == '[') { _s.BrushSize = Math.Max(1, _s.BrushSize - 2); }
-        else if (key.TryGetPrintableRune(out var closeBracket) && closeBracket.Value == ']') { _s.BrushSize = Math.Min(9, _s.BrushSize + 2); }
+        else if (key.TryGetPrintableRune(out var minus) && minus.Value is '-' or '_') { _s.BrushSize = Math.Max(1, _s.BrushSize - 1); }
+        else if (key.TryGetPrintableRune(out var plus) && plus.Value is '=' or '+') { _s.BrushSize = Math.Min(9, _s.BrushSize + 1); }
         else if (key == Key.Tab) { _s.PalettePage++; }
         else if (key == Key.Tab.WithShift) { _s.PalettePage = Math.Max(0, _s.PalettePage - 1); }
         else handled = false;

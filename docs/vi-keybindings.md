@@ -10,7 +10,7 @@ This document covers the common vi bindings and gives the Vixel equivalent for e
 |---|---|---|
 | Normal mode | NORMAL mode | Default state. Movement does not draw. |
 | Insert mode (`i`, `a`, `o`, ...) | `i` enters PAINT mode | Vixel has one insert mode. In PAINT, movement draws. `Esc` returns to NORMAL. |
-| Visual mode (`v`, `V`, `Ctrl+V`) | `v` starts a region select | One selection type only. Move to the second corner. `y` yanks, `p` pastes. `Esc` cancels. |
+| Visual mode (`v`, `V`, `Ctrl+V`) | `v` starts a region select | One selection type only. Move to the second corner. `y` yanks, `d` erases, `Esc` cancels. |
 | Command mode (`:`) | `:` opens the command line | Same idea. See "Ex commands" below. |
 
 ## Movement
@@ -27,14 +27,12 @@ This document covers the common vi bindings and gives the Vixel equivalent for e
 
 ## Editing actions
 
-| Vi | Vixel | Notes |
-|---|---|---|
-| `x` (delete char) | `x` stamps a pixel | Different verb, same key. In Vixel the brush does not move when stamping. "Stamping is not walking." |
+| `x` (delete char) | `x` erases the pixel(s) under the brush | Direct verb map: delete what is under the cursor. Respects brush size. |
+| `r` (replace char) | `r` stamps a pixel | Direct verb map: replace what is under the cursor. `Space` also stamps. |
 | `i` then type | `i` then move with `hjkl` | PAINT draws with every move until `Esc`. |
-| `r` (replace char) | `x` on the target pixel | Stamp over it. |
-| `d` (delete operator) | `e` eraser toggle, then stamp or paint | Erasing is a brush state, not an operator. |
+| `d` (delete operator) | `x` erases under the brush; `v` … `d` erases the selection | Operator + target. `e` toggles an eraser brush state for painting-style erasing. |
 | `dd` (delete line) | `:clear` or `:%d` | Clears the whole canvas. |
-| `c` (change operator) | `e` + paint + `e` | Erase then draw. |
+| `c` (change operator) | `x` or `v`…`d`, then stamp or paint | Erase then draw. |
 | `yy` (yank line) | `v`, move, `y` | Yanks the selected region. |
 | `p` / `P` (paste after/before) | `p` | Paste floats the copy at the brush. Move to position, `Enter` stamps it. |
 | `u` (undo) | `u` | Direct map. |
@@ -48,12 +46,13 @@ These have no vi counterpart:
 
 | Vixel | What it does |
 |---|---|
+| `Space` | Stamp a pixel. The brush does not move. `r` does the same (vi "replace char"). |
 | `f` | Flood fill from the brush position. |
 | `L` | Line: move to the second endpoint, `Enter` commits. |
 | `R` | Rectangle: move to the far corner, `Enter` commits, `Shift+Enter` fills. |
 | `P` | Eyedropper: pick up the color under the brush. |
 | `o` | Brush shape: square / circle. |
-| `[` / `]` | Brush size down / up. |
+| `-`/`_` `=`/`+` | Brush size down / up. |
 | `1`–`9`, `0` | Palette slots. `Tab` / `Shift+Tab` flip palette pages. |
 
 ## Ex commands
