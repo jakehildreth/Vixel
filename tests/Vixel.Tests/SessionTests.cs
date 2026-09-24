@@ -1,4 +1,5 @@
 using Vixel.Core;
+using Vixel.Core.Formats;
 
 namespace Vixel.Tests;
 
@@ -192,4 +193,159 @@ public class SessionTests
             Assert.That(s.CurrentColorIndex, Is.EqualTo(16));
         });
     }
+
+    [Test]
+    public void OpenFile_dispatches_aseprite_by_extension()
+    {
+        var source = new Canvas(2, 2);
+        var palette = new Palette();
+        var index = palette.AddColor(new Rgb(200, 30, 40));
+        source.SetPixel(1, 1, index);
+
+        var temp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"vixel-test-{Guid.NewGuid()}.aseprite");
+        File.WriteAllBytes(temp, AseFormat.Export(source, palette));
+        try
+        {
+            var (canvas, loadedPalette, name) = EditorSession.OpenFile(temp);
+            Assert.Multiple(() =>
+            {
+                Assert.That(canvas[1, 1], Is.Not.Null);
+                Assert.That(name, Is.EqualTo(System.IO.Path.GetFileNameWithoutExtension(temp)));
+                Assert.That(loadedPalette.Colors, Is.Not.Empty);
+            });
+        }
+        finally { File.Delete(temp); }
+    }
+
+    [Test]
+    public void OpenFile_dispatches_pixquare_by_extension()
+    {
+        var source = new Canvas(3, 1);
+        var palette = new Palette();
+        var index = palette.AddColor(new Rgb(1, 2, 3));
+        source.SetPixel(2, 0, index);
+
+        var temp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"vixel-test-{Guid.NewGuid()}.px");
+        File.WriteAllBytes(temp, PxFormat.Export(source, palette));
+        try
+        {
+            var (canvas, _, _) = EditorSession.OpenFile(temp);
+            Assert.That(canvas[2, 0], Is.Not.Null);
+        }
+        finally { File.Delete(temp); }
+    }
+
+    [Test]
+    public void OpenFile_dispatches_piskel_by_extension()
+    {
+        var source = new Canvas(1, 1);
+        var palette = new Palette();
+        var index = palette.AddColor(new Rgb(9, 8, 7));
+        source.SetPixel(0, 0, index);
+
+        var temp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"vixel-test-{Guid.NewGuid()}.piskel");
+        File.WriteAllText(temp, PiskelFormat.Export(source, palette));
+        try
+        {
+            var (canvas, _, _) = EditorSession.OpenFile(temp);
+            Assert.That(canvas[0, 0], Is.Not.Null);
+        }
+        finally { File.Delete(temp); }
+    }
+
+    [Test]
+    public void OpenFile_loads_vixel_as_default()
+    {
+        var canvas = new Canvas(2, 1);
+        var palette = new Palette();
+        canvas.SetPixel(0, 0, palette.AddColor(new Rgb(255, 0, 0)));
+
+        var temp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"vixel-test-{Guid.NewGuid()}.vixel");
+        File.WriteAllText(temp, VixelFile.Save(canvas, palette, "roundtrip"));
+        try
+        {
+            var (loaded, _, name) = EditorSession.OpenFile(temp);
+            Assert.Multiple(() =>
+            {
+                Assert.That(loaded[0, 0], Is.Not.Null);
+                Assert.That(name, Is.EqualTo("roundtrip"));
+            });
+        }
+        finally { File.Delete(temp); }
+    }
+
+    [Test]
+    public void OpenFile_extension_match_is_case_insensitive()
+    {
+        var source = new Canvas(1, 1);
+        var palette = new Palette();
+        source.SetPixel(0, 0, palette.AddColor(new Rgb(10, 20, 30)));
+
+        var temp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"vixel-test-{Guid.NewGuid()}.PX");
+        File.WriteAllBytes(temp, PxFormat.Export(source, palette));
+        try
+        {
+            var (canvas, _, _) = EditorSession.OpenFile(temp);
+            Assert.That(canvas[0, 0], Is.Not.Null);
+        }
+        finally { File.Delete(temp); }
+    }
+
+    [Test]
+    public void OpenFile_imports_real_pixquare_file()
+    {
+        // Real Pixquare export (captured from the app): exercises mixed size semantics
+        // (Entry/Frame/Layer sizes are content-only; Layer includes its tail) and the
+        // corrupt adler32 trailer Pixquare appends after each zlib stream.
+        var fixture = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"vixel-fixture-{Guid.NewGuid()}.px");
+        File.WriteAllBytes(fixture, Convert.FromBase64String(RealPx));
+        try
+        {
+            var (canvas, palette, _) = EditorSession.OpenFile(fixture);
+            var painted = 0;
+            for (var y = 0; y < canvas.Height; y++)
+                for (var x = 0; x < canvas.Width; x++)
+                    if (canvas[x, y] is not null) painted++;
+            Assert.Multiple(() =>
+            {
+                Assert.That(canvas.Width, Is.EqualTo(77));
+                Assert.That(canvas.Height, Is.EqualTo(26));
+                Assert.That(painted, Is.EqualTo(2002));
+                Assert.That(palette.Colors, Has.Count.GreaterThan(0));
+            });
+        }
+        finally { File.Delete(fixture); }
+    }
+
+    private const string RealPx =
+        "hAgAAAAAAAAkAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADc0RENEQTk5LTFG" +
+        "MUYtNDY3MC1CMkU3LUFENTNDRUZDNTNBRE0AAAAaAAAAAQAAAAAAAAAlAAAAAAAAAAAAAAAAAAAAJEM2MEFGNERBLTQyRkEtNDk3" +
+        "QS1CMjJCLUVCRjAzMDUzRkE3RAAAAAAAAAAAAQAAAAAAAADRAAAAJAcJAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEM2MEFGNERB" +
+        "LTQyRkEtNDk3QS1CMjJCLUVCRjAzMDUzRkE3RExheWVyIDEBAAAAAAAAAFkAAAAkJAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" +
+        "MjM1QTE3QUItNTIyNC00NzExLTgwRTEtQTc5MTdGMTNCMTkyZAAAAAE5NzVGMkQzQS1DMTdFLTQyMDMtOUM2QS0zMkQ0NDY0OUY0" +
+        "QzkAQAAAAAAAAAAAAAAAPAEAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAABuBQAAAAAAACRIHwAASgUA" +
+        "AAEAAAAAAAAAAAAAAAAAADk3NUYyRDNBLUMxN0UtNDIwMy05QzZBLTMyRDQ0NjQ5RjRDOXic7Zn3VxRJEMf5Q1SEQySKeAp6koSF" +
+        "XSSYUJEg2QiCmDAgCgIiBiSq5915Ub189w9+b2tue6e7pnqC+qPzXr0nbU1N7+fVd7qqJiMjAxmfLbLVbTqG2OY21G85joYtJxHP" +
+        "bEci8xQat3bg4NZONGV1oSX7NFqze3Doi96k9eFwTj+ObBvAsdwhtOWewfHtZ3Fi+zmczDuP9vwLOJU/jI6CEXQWXEJX4Si6i8Zw" +
+        "uugyeouvoG/HVfTvuIb+kusYKLmBwZ0TOFN6C2dLb+Pcrjs4v2sSF768i4u7pzC8+z5G9kzjUtkMRsseYKx8FpfL53Bl70Nc3beA" +
+        "a189Stoiru9/jImKp7hZ8Qy3Kpdwu/I57lQtY7JqBXer1zBVvY57NRu4f+AFpmtfYqbuFR7UvcZs7BvMxb7FfP13eFj/BgsN32Mx" +
+        "/iMex3/Ck8TPeJr4Bc8a32Lp4Ds8b/rVYFa/mXidQJwxI17NWd0Gs8M5fTiSM4Cj2wY9zNrziNdFdDBmxKuneNxgNpBkNlgygaGd" +
+        "NwVmU0lm9zC8x2WmeI3vnTeYEa8b+5+YzKqI2Qomq1f/Z1bjMpupJV5fY5YxI16PGn4wmTUSs3dJZu8NZrFNbQ4zKQe9zNwck/yJ" +
+        "mbROzKR1yjHFTM8xnRnPMYfZPmLm5pjOTM8xnRnxkvYwH3NzTGem55iHWUqX9G/90plJupT8SZfSumLG1z+VLomZrMtVQ5fSHnRd" +
+        "EjObLpebfjOYkS6leJIuiRnpUvInXUrrPUXj4npYXRIzWZeLFl0ui7q0MQujS52ZepcFM3NzLDKzYpmZblyX/P/JXF0uODkm+dhs" +
+        "+sBLcQ9hdRmFGfFqzTZ1eTTXnxk3xUw3fq+uS8WM+xAzXZfcx3Y5zGqDmcm6fO/wWmn+Pb134kU1hhRPqjHUeSn58/OSagzSJT8v" +
+        "7cxcXUo+XJefhFnDG4su3xo5xpnFLcx0I15BuULMuA9ZmlmqJgt6li0+MfPzsV3kRzWGFFN6l0m6XG3+Q2Tmt1/FjK/rRjkm+RCv" +
+        "Pq2ODfu7uR/lWNAebBbEzOEVt+vSZMZq/6zOSMyo9qf3mKr9bcz02l8/L4OYUY0xXu6el1J8sfavMWt/qmOlez26TMi61Jnptb/q" +
+        "laTYVPtL67z292OmeqUozHiNIcUPY2GZES9eYxCzteY/DWZOjmV2+DOz1bEaM3r3y8zM/nKo1K39wzIjXlT7+/nbrjDMJF0SM5Vj" +
+        "ay0aM6Enj8SM9eSSj19PHsRM1yWdlx/O7LW4N7+eXNeljZnqlaTYyvg678ltzBxeqZ5cjxfETLePYTYbhplQ+ytdrrf8ld5HIslM" +
+        "16Vi5sdJN12XXQWjMjNdlylmfjFtz5XqWNu93PyYcV0qZnqOmcxMXfKeXHqO36wsiBnpUvLhPXkUZraenM/KpHvD6nK91cvMNiuz" +
+        "MbPNyiR/Vfvrxn14Ty75SLU/j2szG7MwRjm20fp3+m+uS96TS89xcsw4L0ccXXYXjonPDFP781mZFIfmPnwtzEV+cylmH3Kvh5mP" +
+        "Ln2Z5aeY6f1l4Vh6JsvrWCnOR83KKpYi/W4+w45yL+lyo/Ufk1my9rfNymzMrDNsoSen81Jm5jMrKw+elUX53WlmqZ48yr2UYy80" +
+        "ZrIuewNn2JIuPXN/7d0vxTGYlU1bZtgL4gxbMQtrfIYd5K+bHzPbrMzzbSkvWJdS7S/NsImZpEs+K9OZkS79ZtjOeam+lQjflsL2" +
+        "5Oq8dJgd+tdlJuiSz8o4M70nD5qV8Z7cZObVJe/JrTPsSvsMW/Xknu9xEWZlipnKMZ3ZZ4tm/wEzAAAAAAAAAKWlpf8rKyv/PDw8" +
+        "/+bm5v80NDT/4uLi/x8fH/8mJib/2NjY/6mpqf+JiYn/ZWVl/8jIyP/e3t7/IyMj/62trf+UlJT/Xl5e/2FhYf/o6Oj/+Pj4/zMz" +
+        "M/9NTU3/v7+//9LS0v+AgID/JSUl/8bGxv8kJCT/Hh4e/5CQkP+ZmZn/8PDw/ykpKf9dXV3/V1dX/yIiIv+enp7/7e3t/5qamv90" +
+        "dHT//////9bW1v8/Pz//bW1t/1ZWVv/f39//pKSk/3Fxcf+Ojo7/s7Oz/wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" +
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAACFEgAAiAAAAAwAAAAAAAAAABAAAAAQAAAAzMzM/+bm5v8A" +
+        "AAAADgAAAAAAAAAAABAAAAAQAAAAAAD//wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAEAAAABAAAA";
 }

@@ -59,6 +59,8 @@ The mode is always on the status line at the bottom. NORMAL is where you live.
 
 The command line speaks vim: `:w [file]` `:q` `:q!` `:wq` `:e <file>`, plus `:color #rrggbb` for custom colors, `:export art.png 4` for a 4x nearest-neighbor PNG, and `:new 128x64` / `:resize 128x64` for canvas size.
 
+Coming from vim? [docs/vi-keybindings.md](docs/vi-keybindings.md) translates the common vi bindings into their Vixel equivalents.
+
 ## Files
 
 - **`.vixel`** is the native format: palette-indexed JSON. Human-readable, git-diffable, hand-editable if you're feeling brave.

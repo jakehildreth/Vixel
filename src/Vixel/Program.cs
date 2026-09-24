@@ -148,7 +148,7 @@ public sealed class EditorSession
     {
         if (path is not null && File.Exists(path))
         {
-            var (canvas, palette, name) = VixelFile.Load(File.ReadAllText(path));
+            var (canvas, palette, name) = OpenFile(path);
             Canvas = canvas;
             Palette = palette;
             Name = name;
@@ -160,6 +160,27 @@ public sealed class EditorSession
             Path = path;
             Name = path is not null ? System.IO.Path.GetFileNameWithoutExtension(path) : "untitled";
             LoadDefaultPalette();
+        }
+    }
+
+    /// <summary>Loads a file by extension: .vixel (JSON) or imported .ase/.aseprite/.px/.piskel.</summary>
+    public static (Canvas Canvas, Palette Palette, string Name) OpenFile(string path)
+    {
+        var name = System.IO.Path.GetFileNameWithoutExtension(path);
+        switch (System.IO.Path.GetExtension(path).ToLowerInvariant())
+        {
+            case ".ase":
+            case ".aseprite":
+                var (aseCanvas, asePalette) = AseFormat.Import(File.ReadAllBytes(path));
+                return (aseCanvas, asePalette, name);
+            case ".px":
+                var (pxCanvas, pxPalette) = PxFormat.Import(File.ReadAllBytes(path));
+                return (pxCanvas, pxPalette, name);
+            case ".piskel":
+                var (piskelCanvas, piskelPalette) = PiskelFormat.Import(File.ReadAllText(path));
+                return (piskelCanvas, piskelPalette, name);
+            default:
+                return VixelFile.Load(File.ReadAllText(path));
         }
     }
 
@@ -328,7 +349,7 @@ public sealed class EditorSession
                 try
                 {
                     var openTarget = ExpandPath(parts[1]);
-                    var (canvas, palette, name) = VixelFile.Load(File.ReadAllText(openTarget));
+                    var (canvas, palette, name) = OpenFile(openTarget);
                     Canvas = canvas; Palette = palette; Name = name; Path = openTarget;
                     Dirty = false;
                     CursorX = CursorY = 0;
