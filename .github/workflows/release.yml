@@ -67,5 +67,30 @@ jobs:
           name: nuget
           path: artifacts/*.nupkg
 
-      # NuGet push is a manual step after the draft release is reviewed:
-      #   dotnet nuget push artifacts/Vixel.<version>.nupkg --api-key $NUGET_API_KEY --source https://api.nuget.org/v3/index.json
+  nuget:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # OIDC token issuance for NuGet trusted publishing
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Download NuGet package
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget
+          path: artifacts
+
+      # Exchanges the GitHub OIDC token for a short-lived (1h) NuGet API key.
+      # Requires a trusted publishing policy on nuget.org:
+      #   owner: jakehildreth, repo: Vixel, workflow file: release.yml
+      - name: NuGet login (OIDC → temp API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Push to nuget.org
+        run: dotnet nuget push artifacts/*.nupkg --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
