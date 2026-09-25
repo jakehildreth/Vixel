@@ -637,14 +637,25 @@ public sealed class CanvasView : View
 
     private void DrawOverlay()
     {
+        // Collect overlay pixels per half-block cell, then render each cell once —
+        // writing halves independently would clobber the first half with the second's bg.
+        var cells = new Dictionary<(int X, int Row), (bool Top, bool Bottom)>();
+
+        void Mark(int x, int y)
+        {
+            if (x < 0 || x >= _s.Canvas.Width || y < 0 || y >= _s.Canvas.Height) return;
+            var key = (x, y / 2);
+            cells.TryGetValue(key, out var halves);
+            cells[key] = y % 2 == 0 ? (true, halves.Bottom) : (halves.Top, true);
+        }
+
         switch (_s.CurrentMode)
         {
             case EditorSession.Mode.Line:
                 // Preview the committed shape: Bresenham spine with the brush footprint at each point.
                 foreach (var p in Bresenham.Line(_s.AnchorX, _s.AnchorY, _s.CursorX, _s.CursorY)
-                             .SelectMany(p => Tools.Footprint(p.X, p.Y, _s.BrushSize, _s.CircleBrush))
-                             .Distinct())
-                    PaintOverlay(p.X, p.Y);
+                             .SelectMany(p => Tools.Footprint(p.X, p.Y, _s.BrushSize, _s.CircleBrush)))
+                    Mark(p.X, p.Y);
                 break;
             case EditorSession.Mode.Rect:
             case EditorSession.Mode.Select:
@@ -655,43 +666,40 @@ public sealed class CanvasView : View
                 for (var y = t; y <= b; y++)
                     for (var x = l; x <= r; x++)
                         if (y - t < thickness || b - y < thickness || x - l < thickness || r - x < thickness)
-                            PaintOverlay(x, y, ants: _s.CurrentMode == EditorSession.Mode.Select, ringPos: PerimeterIndex(x - l, y - t, r - l + 1, b - t + 1));
+                        {
+                            if (_s.CurrentMode == EditorSession.Mode.Select
+                                && (PerimeterIndex(x - l, y - t, r - l + 1, b - t + 1) + _s.AntPhase) % 3 != 0)
+                                continue; // marching ants: only every third perimeter pixel is lit
+                            Mark(x, y);
+                        }
                 break;
             case EditorSession.Mode.Paste when _s.Clipboard is not null:
                 for (var dy = 0; dy < _s.Clipboard.Height; dy++)
                     for (var dx = 0; dx < _s.Clipboard.Width; dx++)
                         if (_s.Clipboard.Pixels[dx, dy] is not null)
-                            PaintOverlay(_s.CursorX + dx, _s.CursorY + dy);
+                            Mark(_s.CursorX + dx, _s.CursorY + dy);
                 break;
         }
-    }
-
-    private void PaintOverlay(int x, int y, bool ants = false, int ringPos = 0)
-    {
-        if (x < 0 || x >= _s.Canvas.Width || y < 0 || y >= _s.Canvas.Height) return;
-        if (ants && (ringPos + _s.AntPhase) % 3 != 0) return;
 
         // Transient pixels flash like the cursor: full color ↔ 50% dim.
         var rgb = _s.EffectiveColor is { } i ? _s.Palette.Colors[i] : new Rgb(255, 255, 255);
         var shown = _s.BlinkPhase == 0 ? rgb : new Rgb((byte)(rgb.R / 2), (byte)(rgb.G / 2), (byte)(rgb.B / 2));
-        PaintHalfCell(x, y, ToTerminal(shown));
+        var term = ToTerminal(shown);
+
+        foreach (var ((x, row), (top, bottom)) in cells)
+        {
+            var otherY = top ? row * 2 + 1 : row * 2;
+            var other = top && bottom
+                ? term
+                : ToTerminal(otherY < _s.Canvas.Height && RenderColor(_s.Canvas[x, otherY]) is { } o
+                    ? o
+                    : BackgroundShade(x, otherY));
+            SetAttribute(new Attribute(term, other));
+            Move(x, row);
+            AddRune(top ? '▀' : '▄');
+        }
     }
 
-    // Paints a single canvas pixel (one half of a half-block cell), preserving the other
-    // half's committed content. Overlay pixels are always half-height — never a full block.
-    private void PaintHalfCell(int x, int y, Color term)
-    {
-        if (x < 0 || x >= _s.Canvas.Width || y < 0 || y >= _s.Canvas.Height) return;
-        var otherY = y % 2 == 0 ? y + 1 : y - 1;
-        var other = otherY < _s.Canvas.Height ? RenderColor(_s.Canvas[x, otherY]) : null;
-        var otherTerm = ToTerminal(other ?? BackgroundShade(x, otherY));
-
-        // ▀ and ▄ both draw their half from fg; bg fills the other half.
-        // The painted pixel's color always goes in fg.
-        SetAttribute(new Attribute(term, otherTerm));
-        Move(x, y / 2);
-        AddRune(y % 2 == 0 ? '▀' : '▄');
-    }
 
     private void DrawCursor()
     {
