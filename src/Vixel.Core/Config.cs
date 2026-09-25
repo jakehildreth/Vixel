@@ -9,6 +9,7 @@ namespace Vixel.Core;
 public sealed class VixelConfig
 {
     private readonly string _path;
+    private readonly string _splashPath;
 
     private sealed class State
     {
@@ -21,6 +22,7 @@ public sealed class VixelConfig
     public VixelConfig(string directory)
     {
         _path = Path.Combine(directory, "config.json");
+        _splashPath = Path.Combine(directory, "splash.txt");
         Load();
     }
 
@@ -29,6 +31,25 @@ public sealed class VixelConfig
 
     public static string DefaultDirectory() =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "vixel");
+
+
+    /// <summary>
+    /// User-edited splash lines from splash.txt, or null when absent/unreadable
+    /// (caller falls back to the embedded default). {version} substitution is the caller's job.
+    /// </summary>
+    public IReadOnlyList<string>? LoadSplashOverride()
+    {
+        try
+        {
+            if (File.Exists(_splashPath))
+                return File.ReadAllLines(_splashPath);
+        }
+        catch (Exception)
+        {
+            // treat unreadable as absent
+        }
+        return null;
+    }
 
     public bool SplashDismissed => _state.SplashDismissed;
 

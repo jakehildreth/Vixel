@@ -81,7 +81,7 @@ else
         splash = null;
     }
 
-    splash = new SplashView(level, dismissForever: () => Dismiss(forever: true), dismissOnce: () => Dismiss(forever: false));
+    splash = new SplashView(level, dismissForever: () => Dismiss(forever: true), dismissOnce: () => Dismiss(forever: false), config);
     window.Add(splash);
     app.AddTimeout(TimeSpan.FromSeconds(5), () =>
     {
@@ -90,6 +90,28 @@ else
     });
 }
 session.StatusChanged();
+
+// Help overlay: shown on :help or F1; any key closes.
+HelpView? help = null;
+app.AddTimeout(TimeSpan.FromMilliseconds(100), () =>
+{
+    if (session.HelpRequested)
+    {
+        session.HelpRequested = false;
+        if (help is null)
+        {
+            help = new HelpView(close: () =>
+            {
+                window.Remove(help);
+                help = null;
+                canvasView.SetFocus();
+            });
+            window.Add(help);
+            help.SetFocus();
+        }
+    }
+    return true;
+});
 
 // Cursor blink ticks always; marching ants only while an overlay is animated.
 app.AddTimeout(TimeSpan.FromMilliseconds(200), () =>
@@ -143,6 +165,9 @@ public sealed class EditorSession
     public string Message = "";
 
     public Action? StatusChanged;
+
+    /// <summary>Set by :help; the TUI shows the help view and clears it.</summary>
+    public bool HelpRequested;
 
     public EditorSession(string? path)
     {
@@ -326,6 +351,36 @@ public sealed class EditorSession
         : path.StartsWith("~/") ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + path[1..]
         : path;
 
+    /// <summary>Stars the repo via an authed gh CLI. Null when gh is missing, unauthed, or the call fails.</summary>
+    private static string? StarViaGitHubCli()
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("gh", "api -X PUT /user/starred/jakehildreth/Vixel")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            using var process = System.Diagnostics.Process.Start(psi);
+            if (process is null) return null;
+            if (!process.WaitForExit(5000)) { process.Kill(); return null; }
+            return process.ExitCode == 0 ? "starred jakehildreth/Vixel via gh" : null;
+        }
+        catch (Exception) { return null; } // gh not installed
+    }
+
+    private static string OpenInBrowser(string url)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+            return $"opened {new Uri(url).Host}/jakehildreth/vixel — star it there";
+        }
+        catch (Exception) { return $"star: {url}"; }
+    }
+
     private bool ExecuteCommandCore(string[] parts, ref bool quit)
     {
 
@@ -337,6 +392,13 @@ public sealed class EditorSession
                 Path = target;
                 Dirty = false;
                 Message = $"wrote {target}";
+                return true;
+            case "star":
+                Message = StarViaGitHubCli() ?? OpenInBrowser("https://github.com/jakehildreth/vixel");
+                return true;
+            case "help":
+                HelpRequested = true;
+                Message = "help";
                 return true;
             case "clear":
             case "%d":
@@ -500,6 +562,7 @@ public sealed class CanvasView : View
         else if (key.TryGetPrintableRune(out var plus) && plus.Value is '=' or '+') { _s.BrushSize = Math.Min(9, _s.BrushSize + 1); }
         else if (key == Key.Tab) { _s.PalettePage++; }
         else if (key == Key.Tab.WithShift) { _s.PalettePage = Math.Max(0, _s.PalettePage - 1); }
+        else if (key == Key.F1) { _s.HelpRequested = true; }
         else handled = false;
 
         SetNeedsDraw();
@@ -721,15 +784,26 @@ public sealed class SplashView : View
     private readonly ColorCapabilityLevel _level;
     private readonly Action _dismissForever;
     private readonly Action _dismissOnce;
+    private readonly VixelConfig _config;
 
-    public SplashView(ColorCapabilityLevel level, Action dismissForever, Action dismissOnce)
+    public SplashView(ColorCapabilityLevel level, Action dismissForever, Action dismissOnce, VixelConfig config)
     {
         _level = level;
         _dismissForever = dismissForever;
         _dismissOnce = dismissOnce;
+        _config = config;
         Width = Dim.Fill();
         Height = Dim.Fill();
         CanFocus = true;
+    }
+
+    private static string[] LoadEmbeddedSplash()
+    {
+        var asm = typeof(SplashView).Assembly;
+        using var stream = asm.GetManifestResourceStream("Vixel.splash.txt");
+        if (stream is null) return ["ViXeL - Vi for piXeLs"];
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd().Split('\n').Select(l => l.TrimEnd('\r')).ToArray();
     }
 
     protected override bool OnKeyDown(Key key)
@@ -739,13 +813,38 @@ public sealed class SplashView : View
         return true;
     }
 
-    protected override bool OnDrawingContent(DrawContext? context)
+    /// <summary>
+    /// Pure splash layout: given text lines and viewport dims, returns art/text origin and
+    /// the block's left edge. Extracted for tests — the composite (art + 1 blank + text) is
+    /// centered vertically as a unit; text block is centered horizontally by longest line.
+    /// </summary>
+    public static (int BlockTop, int TextLeft, int TextTop) Layout(IReadOnlyList<string> lines, int viewportWidth, int viewportHeight)
     {
         var cellRows = SplashArt.Height / 2;
-        var originX = Math.Max(0, (Viewport.Width - SplashArt.Width) / 2);
-        var originY = Math.Max(0, (Viewport.Height - cellRows) / 2);
+        var totalRows = cellRows + 1 + lines.Count;
+        var blockTop = Math.Max(0, (viewportHeight - totalRows) / 2);
+        var blockWidth = lines.Count == 0 ? 0 : lines.Max(l => l.Length);
+        var textLeft = Math.Max(0, (viewportWidth - blockWidth) / 2);
+        return (blockTop, textLeft, blockTop + cellRows + 1);
+    }
 
-        for (var cellRow = 0; cellRow < cellRows; cellRow++)
+
+    protected override bool OnDrawingContent(DrawContext? context)
+    {
+        // Package version (CalVer) travels in AssemblyInformationalVersion on every build.
+        var informational = System.Reflection.CustomAttributeExtensions
+            .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(
+                typeof(EditorSession).Assembly)?.InformationalVersion;
+        var versionText = informational is null ? "" : informational.Split('+')[0]; // strip commit hash suffix
+        var raw = _config.LoadSplashOverride() ?? LoadEmbeddedSplash();
+        var lines = raw.Select(l => l.Replace("{version}", versionText)).ToArray();
+
+        var cellRows = SplashArt.Height / 2;
+        var (blockTop, textLeft, textTop) = Layout(lines, Viewport.Width, Viewport.Height);
+        var originX = Math.Max(0, (Viewport.Width - SplashArt.Width) / 2);
+        var originY = blockTop;
+
+        for (var cellRow = 0; cellRow < cellRows && originY + cellRow < Viewport.Height; cellRow++)
         {
             for (var x = 0; x < SplashArt.Width; x++)
             {
@@ -762,12 +861,112 @@ public sealed class SplashView : View
             }
         }
 
+        // Color.None = terminal default fg/bg: normal text, no black box behind glyphs.
+        // Positions come from Layout (unit-tested).
+        SetAttribute(new Attribute(Color.None, Color.None));
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (lines[i].Length == 0 || textTop + i >= Viewport.Height) continue;
+            Move(textLeft, textTop + i);
+            AddStr(lines[i]);
+        }
+
         var hint = "esc: never show again · any other key: continue";
-        Move(Math.Max(0, (Viewport.Width - hint.Length) / 2), Math.Min(Viewport.Height - 1, originY + cellRows + 1));
-        SetAttribute(new Attribute(Color.DarkGray, Color.Black));
+        Move(Math.Max(0, (Viewport.Width - hint.Length) / 2), Viewport.Height - 1);
+        SetAttribute(new Attribute(Color.None, Color.None));
         AddStr(hint);
         return true;
     }
 
     private Color ToTerm(Rgb rgb) => new(rgb.R, rgb.G, rgb.B);
+}
+
+/// <summary>On-line help: the full key + command reference. Scrolls with j/k/arrows; any other key closes.</summary>
+public sealed class HelpView : View
+{
+    private static readonly string[] Lines =
+    [
+        "VIXEL HELP",
+        "",
+        "Movement",
+        "  h j k l / arrows   move the brush",
+        "",
+        "Editing",
+        "  Space / r          stamp a pixel (brush does not move)",
+        "  x                  erase pixel(s) under the brush",
+        "  i                  PAINT mode: movement draws until Esc",
+        "  e                  eraser toggle",
+        "  f                  flood fill",
+        "",
+        "Shapes",
+        "  L                  line: move to second point, Enter commits",
+        "  R                  rectangle: Enter commits, Shift+Enter fills",
+        "",
+        "Selection",
+        "  v                  start region; move to far corner",
+        "  y                  yank the selection",
+        "  d                  erase the selection",
+        "  p                  paste floats at brush, Enter stamps",
+        "",
+        "Color and brush",
+        "  P                  eyedropper (pick color under brush)",
+        "  1-9, 0             palette slots; Tab / Shift+Tab flip pages",
+        "  -/_  =/+           brush size down / up",
+        "  o                  brush shape: square / circle",
+        "",
+        "History",
+        "  u                  undo",
+        "  Ctrl+R             redo",
+        "",
+        "Commands",
+        "  :w [file]          write .vixel",
+        "  :q  :q!  :wq       quit (with save / discard)",
+        "  :e <file>          open .vixel/.ase/.aseprite/.px/.piskel",
+        "  :export <png> [n]  PNG export, integer scale",
+        "  :color #rrggbb     add palette color",
+        "  :new [WxH]         fresh canvas (default 64x32)",
+        "  :resize WxH        resize canvas",
+        "  :clear  :%d        clear canvas",
+        "  :star              open the GitHub repo",
+        "  :help  <F1>        this help",
+        "",
+        "Esc                exit PAINT / cancel / close this help",
+    ];
+
+    private readonly Action _close;
+    private int _scroll;
+
+    public HelpView(Action close)
+    {
+        _close = close;
+        Width = Dim.Fill();
+        Height = Dim.Fill();
+        CanFocus = true;
+    }
+
+    protected override bool OnKeyDown(Key key)
+    {
+        if (key == Key.J || key == Key.CursorDown)
+            _scroll = Math.Min(Math.Max(0, Lines.Length - Viewport.Height), _scroll + 1);
+        else if (key == Key.K || key == Key.CursorUp)
+            _scroll = Math.Max(0, _scroll - 1);
+        else
+            _close();
+        return true;
+    }
+
+    protected override bool OnDrawingContent(DrawContext? context)
+    {
+        SetAttribute(new Attribute(Color.None, Color.None));
+        var maxWidth = Lines.Max(l => l.Length);
+        var originX = Math.Max(0, (Viewport.Width - maxWidth) / 2);
+        for (var row = 0; row < Viewport.Height; row++)
+        {
+            var lineIndex = _scroll + row;
+            if (lineIndex >= Lines.Length) break;
+            Move(originX, row);
+            AddStr(Lines[lineIndex]);
+        }
+        return true;
+    }
 }
