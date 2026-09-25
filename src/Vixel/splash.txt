@@ -1,0 +1,14 @@
+     ViXeL - Vi for piXeLs        
+     version {version}            
+       by Jake Hildreth           
+                                  
+           Vixel is:              
+          open source             
+       resale restricted          
+      MIT + Commons Clause        
+                                  
+      Star Vixel on GitHub!       
+type :star<Enter>         to star 
+                                  
+type :q<Enter>            to exit 
+type :help<Enter> or <F1> for help

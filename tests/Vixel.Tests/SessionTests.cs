@@ -86,6 +86,24 @@ public class SessionTests
         Assert.That(s.Canvas[1, 2], Is.EqualTo(0), "undo restores region");
     }
 
+
+    [Test]
+    public void Command_help_sets_help_requested_flag()
+    {
+        var s = NewSession();
+        s.ExecuteCommand("help", out _);
+        Assert.That(s.HelpRequested, Is.True);
+    }
+
+    [Test]
+    public void Command_star_sets_message_without_throwing()
+    {
+        var s = NewSession();
+        s.ExecuteCommand("star", out _);
+        // gh-starred (CI/dev machines with authed gh) or browser fallback — both carry the repo slug.
+        Assert.That(s.Message, Does.Contain("jakehildreth/Vixel").Or.Contain("jakehildreth/vixel"));
+    }
+
     [Test]
     public void New_session_names_untitled_not_null()
     {

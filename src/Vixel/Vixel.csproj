@@ -34,4 +34,9 @@
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Default splash text, overridable via ~/.config/vixel/splash.txt -->
+    <EmbeddedResource Include="splash.txt" LogicalName="Vixel.splash.txt" />
+  </ItemGroup>
+
 </Project>
