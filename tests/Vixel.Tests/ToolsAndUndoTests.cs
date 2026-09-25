@@ -44,6 +44,40 @@ public class ToolTests
     }
 
     [Test]
+    public void Rect_outline_thickens_with_brush_size()
+    {
+        var canvas = new Canvas(10, 10);
+        Tools.Rect(canvas, 1, 1, 8, 8, 1, filled: false, brushSize: 2);
+        Assert.Multiple(() =>
+        {
+            Assert.That(canvas[2, 2], Is.EqualTo(1), "thickness 2 covers (2,2)");
+            Assert.That(canvas[2, 1], Is.EqualTo(1));
+            Assert.That(canvas[3, 3], Is.Null, "interior beyond thickness untouched");
+        });
+    }
+
+    [Test]
+    public void Rect_outline_default_brush_matches_legacy_1px()
+    {
+        var canvas = new Canvas(6, 6);
+        var change = Tools.Rect(canvas, 1, 1, 4, 4, 1, filled: false);
+        Assert.That(change.Touched, Has.Count.EqualTo(12), "default brushSize=1 keeps the 1px outline");
+    }
+
+    [Test]
+    public void Line_brush_size_fattens_committed_pixels()
+    {
+        var canvas = new Canvas(10, 10);
+        var change = Tools.Line(canvas, 0, 0, 9, 0, 1, brushSize: 3, circle: false);
+        Assert.Multiple(() =>
+        {
+            Assert.That(canvas[5, 0], Is.EqualTo(1));
+            Assert.That(canvas[5, 1], Is.EqualTo(1), "brush 3 covers one row below the spine");
+            Assert.That(change.Touched.Count, Is.GreaterThan(10), "more than a 1px line");
+        });
+    }
+
+    [Test]
     public void Rect_filled_touches_interior()
     {
         var canvas = new Canvas(6, 6);

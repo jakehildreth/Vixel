@@ -19,18 +19,20 @@ public static class Tools
                 .Distinct()
                 .Select(p => (p.X, p.Y, index)));
 
-    /// <summary>Rectangle between two corners, either orientation; outline or filled.</summary>
-    public static PixelChange Rect(Canvas canvas, int x0, int y0, int x1, int y1, int? index, bool filled)
+    /// <summary>Rectangle between two corners, either orientation; outline (brush-thick, growing inward) or filled.</summary>
+    public static PixelChange Rect(Canvas canvas, int x0, int y0, int x1, int y1, int? index, bool filled, int brushSize = 1)
     {
         var (left, right) = (Math.Min(x0, x1), Math.Max(x0, x1));
         var (top, bottom) = (Math.Min(y0, y1), Math.Max(y0, y1));
 
         var writes = new List<(int, int, int?)>();
+        var thickness = Math.Max(1, brushSize);
         for (var y = top; y <= bottom; y++)
         {
             for (var x = left; x <= right; x++)
             {
-                if (filled || y == top || y == bottom || x == left || x == right)
+                var onOutline = y - top < thickness || bottom - y < thickness || x - left < thickness || right - x < thickness;
+                if (filled || onOutline)
                     writes.Add((x, y, index));
             }
         }

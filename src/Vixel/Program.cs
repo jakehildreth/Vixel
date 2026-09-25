@@ -300,7 +300,7 @@ public sealed class EditorSession
                 History.Push(Tools.Line(Canvas, AnchorX, AnchorY, CursorX, CursorY, EffectiveColor, BrushSize, CircleBrush));
                 break;
             case Mode.Rect:
-                History.Push(Tools.Rect(Canvas, AnchorX, AnchorY, CursorX, CursorY, EffectiveColor, filled: shifted));
+                History.Push(Tools.Rect(Canvas, AnchorX, AnchorY, CursorX, CursorY, EffectiveColor, filled: shifted, BrushSize));
                 break;
             case Mode.Select:
                 Clipboard = Tools.Copy(Canvas, AnchorX, AnchorY, CursorX, CursorY);
@@ -640,16 +640,21 @@ public sealed class CanvasView : View
         switch (_s.CurrentMode)
         {
             case EditorSession.Mode.Line:
-                foreach (var p in Bresenham.Line(_s.AnchorX, _s.AnchorY, _s.CursorX, _s.CursorY))
+                // Preview the committed shape: Bresenham spine with the brush footprint at each point.
+                foreach (var p in Bresenham.Line(_s.AnchorX, _s.AnchorY, _s.CursorX, _s.CursorY)
+                             .SelectMany(p => Tools.Footprint(p.X, p.Y, _s.BrushSize, _s.CircleBrush))
+                             .Distinct())
                     PaintOverlay(p.X, p.Y);
                 break;
             case EditorSession.Mode.Rect:
             case EditorSession.Mode.Select:
                 var (l, r) = (Math.Min(_s.AnchorX, _s.CursorX), Math.Max(_s.AnchorX, _s.CursorX));
                 var (t, b) = (Math.Min(_s.AnchorY, _s.CursorY), Math.Max(_s.AnchorY, _s.CursorY));
+                // Rect previews the committed outline: brush-thick, growing inward. Select stays 1px ants.
+                var thickness = _s.CurrentMode == EditorSession.Mode.Rect ? Math.Max(1, _s.BrushSize) : 1;
                 for (var y = t; y <= b; y++)
                     for (var x = l; x <= r; x++)
-                        if (y == t || y == b || x == l || x == r)
+                        if (y - t < thickness || b - y < thickness || x - l < thickness || r - x < thickness)
                             PaintOverlay(x, y, ants: _s.CurrentMode == EditorSession.Mode.Select, ringPos: PerimeterIndex(x - l, y - t, r - l + 1, b - t + 1));
                 break;
             case EditorSession.Mode.Paste when _s.Clipboard is not null:
