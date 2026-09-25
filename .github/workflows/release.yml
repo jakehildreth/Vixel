@@ -48,6 +48,7 @@ jobs:
               -p:IncludeNativeLibrariesForSelfExtract=true \
               -p:DebugType=none -p:DebugSymbols=false \
               -o "publish/$RID" \
+              /p:Version=${{ steps.version.outputs.version }} /p:AssemblyVersion=${{ steps.version.outputs.asm }}
             (cd "publish/$RID" && zip -qr "../../artifacts/vixel-${{ steps.version.outputs.version }}-$RID.zip" .)
           done
 
