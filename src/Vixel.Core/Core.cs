@@ -128,8 +128,9 @@ public sealed class Canvas
         var touched = new List<PixelTouch>();
         var next = new int?[newWidth, newHeight];
 
-        // Record cropped pixels (lost) and newly exposed cells so grow is visibly undoable
-        // and undo of a shrink restores what was cropped. ApplyInverse keys off WidthBefore.
+        // Record cropped pixels (lost) and newly exposed cells that carried content, so undo of a
+        // shrink restores what was cropped. ApplyInverse keys off WidthBefore for size restoration;
+        // transparent exposed cells are no-ops (null→null) and are not recorded.
         for (var y = 0; y < Math.Max(Height, newHeight); y++)
         {
             for (var x = 0; x < Math.Max(Width, newWidth); x++)
@@ -137,9 +138,7 @@ public sealed class Canvas
                 var old = x < Width && y < Height ? _pixels[x, y] : (int?)null;
                 if (x < newWidth && y < newHeight) next[x, y] = old;
                 var cropped = x < Width && y < Height && (x >= newWidth || y >= newHeight);
-                var exposed = x >= Width || y >= Height;
                 if (cropped) touched.Add(new PixelTouch(x, y, old, null));
-                else if (exposed) touched.Add(new PixelTouch(x, y, null, old));
             }
         }
 
@@ -290,5 +289,23 @@ public static class Xterm256
         long dg = a.G - (long)b.G;
         long db = a.B - (long)b.B;
         return ((512 + rMean) * dr * dr >> 8) + 4 * dg * dg + ((767 - rMean) * db * db >> 8);
+    }
+}
+
+/// <summary>Atomic file writes: temp file in the same directory, then move over the target.</summary>
+public static class AtomicWrite
+{
+    public static void WriteAllText(string path, string contents)
+    {
+        var tmp = path + ".tmp";
+        File.WriteAllText(tmp, contents);
+        File.Move(tmp, path, overwrite: true);
+    }
+
+    public static void WriteAllBytes(string path, byte[] contents)
+    {
+        var tmp = path + ".tmp";
+        File.WriteAllBytes(tmp, contents);
+        File.Move(tmp, path, overwrite: true);
     }
 }
