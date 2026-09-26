@@ -150,7 +150,23 @@ public sealed class EditorSession
     public int CursorY;
     public int CurrentColorIndex;
     public bool Erasing;
-    public int BrushSize = 1;
+    private int _brushSize = 1;
+    /// <summary>Brush size on the odd ladder 1/3/5/7/9 — even sizes have no center pixel.</summary>
+    public int BrushSize
+    {
+        get => _brushSize;
+        set => _brushSize = value; // field-write for tests; UI goes through AdjustBrush
+    }
+
+    /// <summary>Steps the brush size by 1 within 1..9. Square allows every size (even sizes focus
+    /// 1 up/left of center). Circle skips 2 — a size-2 circle has no inscribed center.</summary>
+    public void AdjustBrush(int direction)
+    {
+        var step = Math.Sign(direction);
+        var next = _brushSize + step;
+        if (CircleBrush && next == 2) next += step;
+        _brushSize = Math.Clamp(next, 1, 9);
+    }
     public bool CircleBrush;
     public int PalettePage;
     public bool Dirty;
@@ -721,8 +737,8 @@ public sealed class CanvasView : View
         else if (key == Key.R.WithCtrl && _s.CurrentMode == EditorSession.Mode.Normal) _s.Redo();
         else if (key.TryGetPrintableRune(out var colon) && colon.Value == ':') { _s.CurrentMode = EditorSession.Mode.Command; _s.CommandBuffer = ""; _s.CommandCursor = 0; }
         else if (key.TryGetPrintableRune(out var digit) && digit.Value >= '1' && digit.Value <= '9') SetPaletteSlot(digit.Value - '1');
-        else if (key.TryGetPrintableRune(out var minus) && minus.Value is '-' or '_') { _s.BrushSize = Math.Max(1, _s.BrushSize - 1); }
-        else if (key.TryGetPrintableRune(out var plus) && plus.Value is '=' or '+') { _s.BrushSize = Math.Min(9, _s.BrushSize + 1); }
+        else if (key.TryGetPrintableRune(out var minus) && minus.Value is '-' or '_') { _s.AdjustBrush(-1); }
+        else if (key.TryGetPrintableRune(out var plus) && plus.Value is '=' or '+') { _s.AdjustBrush(+1); }
         else if (key == Key.Tab) { _s.PalettePage++; }
         else if (key == Key.Tab.WithShift) { _s.PalettePage = Math.Max(0, _s.PalettePage - 1); }
         else if (key == Key.F1) { _s.EnterHelp(); }

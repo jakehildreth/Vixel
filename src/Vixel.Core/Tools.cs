@@ -48,11 +48,16 @@ public static class Tools
             yield break;
         }
 
+        // Odd size: focus is the exact center — offsets symmetric ±(size-1)/2.
+        // Even size: no center pixel — focus sits 1 up and 1 left of center, so the N×N block
+        // spans [-(N/2 - 1), N/2]; size 2 covers the focus cell plus the three right and down.
+        var even = size % 2 == 0;
+        var lo = even ? -((size / 2) - 1) : -((size - 1) / 2);
+        var hi = even ? size / 2 : (size - 1) / 2;
         var radius = (size - 1) / 2.0;
-        var extent = (size - 1 + 1) / 2; // integer radius covering the square
-        for (var dy = -extent; dy <= extent; dy++)
+        for (var dy = lo; dy <= hi; dy++)
         {
-            for (var dx = -extent; dx <= extent; dx++)
+            for (var dx = lo; dx <= hi; dx++)
             {
                 if (circle && dx * dx + dy * dy > radius * radius + 0.5) continue;
                 yield return (x + dx, y + dy);
