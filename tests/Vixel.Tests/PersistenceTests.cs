@@ -91,6 +91,18 @@ public class VixelFileTests
     }
 
     [Test]
+    public void Load_rejects_row_that_is_not_an_array()
+    {
+        // Regression for #56: a scalar/object row must throw InvalidDataException, not InvalidCastException.
+        const string json = """
+            { "version": 1, "name": "bad", "width": 2, "height": 1,
+              "palette": ["#000000"],
+              "rows": [42] }
+            """;
+        Assert.Throws<InvalidDataException>(() => VixelFile.Load(json));
+    }
+
+    [Test]
     public void Load_rejects_dimension_mismatch()
     {
         var json = """{"version": 1, "width": 3, "height": 1, "palette": [], "rows": [[null]]}""";
@@ -305,5 +317,34 @@ public class AseTests
     public void Import_rejects_truncated_file()
     {
         Assert.Throws<InvalidDataException>(() => AseFormat.Import([0xA0, 0xE0]));
+    }
+
+    [Test]
+    public void Import_rejects_truncation_at_every_length()
+    {
+        // Regression for #56: a truncated .ase must throw InvalidDataException, not
+        // EndOfStreamException. Sweep every prefix of a valid file.
+        var palette = new Palette();
+        var red = palette.AddColor(new Rgb(255, 0, 0));
+        var canvas = new Canvas(2, 2);
+        canvas.SetPixel(1, 1, red);
+        var bytes = AseFormat.Export(canvas, palette);
+
+        for (var len = 0; len < bytes.Length; len++)
+        {
+            var truncated = bytes[..len];
+            try
+            {
+                AseFormat.Import(truncated);
+            }
+            catch (InvalidDataException)
+            {
+                // expected
+            }
+            catch (Exception e)
+            {
+                Assert.Fail($"length {len}: expected InvalidDataException, got {e.GetType().Name}: {e.Message}");
+            }
+        }
     }
 }

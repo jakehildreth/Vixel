@@ -75,7 +75,8 @@ public static class VixelFile
         var canvas = new Canvas(width, height);
         for (var y = 0; y < height; y++)
         {
-            var row = rows[y]!.AsArray();
+            var row = rows[y] as JsonArray
+                ?? throw new InvalidDataException($"row {y} is not an array");
             if (row.Count != width)
                 throw new InvalidDataException($"row {y} count {row.Count} != width {width}");
             for (var x = 0; x < width; x++)
