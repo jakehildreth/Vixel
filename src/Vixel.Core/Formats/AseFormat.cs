@@ -168,32 +168,39 @@ public static class AseFormat
         var canvas = new Canvas(width, height);
         var palette = new Palette();
 
-        for (var f = 0; f < frames; f++)
+        try
         {
-            var frameStart = reader.BaseStream.Position;
-            var frameBytes = reader.ReadUInt32();
-            if (reader.ReadUInt16() != FrameMagic) throw new InvalidDataException("bad frame magic");
-            var oldChunks = reader.ReadUInt16();
-            reader.ReadUInt16(); // duration
-            reader.ReadBytes(2);
-            var newChunks = reader.ReadUInt32();
-            var chunkCount = newChunks != 0 ? (int)newChunks : oldChunks;
-
-            for (var c = 0; c < chunkCount; c++)
+            for (var f = 0; f < frames; f++)
             {
-                var chunkStart = reader.BaseStream.Position;
-                var chunkSize = reader.ReadUInt32();
-                var chunkType = reader.ReadUInt16();
+                var frameStart = reader.BaseStream.Position;
+                var frameBytes = reader.ReadUInt32();
+                if (reader.ReadUInt16() != FrameMagic) throw new InvalidDataException("bad frame magic");
+                var oldChunks = reader.ReadUInt16();
+                reader.ReadUInt16(); // duration
+                reader.ReadBytes(2);
+                var newChunks = reader.ReadUInt32();
+                var chunkCount = newChunks != 0 ? (int)newChunks : oldChunks;
 
-                if (f == 0 && chunkType == 0x2005) // cel — first frame only (flatten)
+                for (var c = 0; c < chunkCount; c++)
                 {
-                    ReadCel(reader, canvas, palette);
+                    var chunkStart = reader.BaseStream.Position;
+                    var chunkSize = reader.ReadUInt32();
+                    var chunkType = reader.ReadUInt16();
+
+                    if (f == 0 && chunkType == 0x2005) // cel — first frame only (flatten)
+                    {
+                        ReadCel(reader, canvas, palette);
+                    }
+
+                    reader.BaseStream.Seek(chunkStart + chunkSize, SeekOrigin.Begin);
                 }
 
-                reader.BaseStream.Seek(chunkStart + chunkSize, SeekOrigin.Begin);
+                reader.BaseStream.Seek(frameStart + frameBytes, SeekOrigin.Begin);
             }
-
-            reader.BaseStream.Seek(frameStart + frameBytes, SeekOrigin.Begin);
+        }
+        catch (EndOfStreamException e)
+        {
+            throw new InvalidDataException("truncated ase file", e);
         }
 
         return (canvas, palette);
