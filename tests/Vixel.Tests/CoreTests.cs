@@ -242,17 +242,16 @@ public class QuantizerTests
         }
     }
 
-    [Theory]
-    [InlineData(0, -1, "y")]
-    [InlineData(0, 2, "y")]
-    [InlineData(-1, 0, "x")]
-    [InlineData(2, 0, "x")]
+    [TestCase(0, -1, "y")]
+    [TestCase(0, 2, "y")]
+    [TestCase(-1, 0, "x")]
+    [TestCase(2, 0, "x")]
     public void SetPixel_OutOfRange_ReportsOffendingParameter(int x, int y, string paramName)
     {
         var canvas = new Canvas(2, 2);
 
         var error = Assert.Throws<ArgumentOutOfRangeException>(() => canvas.SetPixel(x, y, 0));
 
-        Assert.Equal(paramName, error.ParamName);
+        Assert.That(error!.ParamName, Is.EqualTo(paramName));
     }
 }
