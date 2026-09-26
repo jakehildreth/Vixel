@@ -740,8 +740,8 @@ public class CommandHistoryAndCompletionTests
         s.ExecuteCommand("w", out _);
         s.ExecuteCommand("clear", out _);
 
-        Assert.That(s.HistoryRecall(-1), Is.EqualTo("clear"), "up recalls most recent");
-        Assert.That(s.HistoryRecall(-1), Is.EqualTo("w"), "up again recalls the one before");
+        Assert.That(s.HistoryRecall(-1, ""), Is.EqualTo("clear"), "up recalls most recent");
+        Assert.That(s.HistoryRecall(-1, "clear"), Is.EqualTo("w"), "up again recalls the one before");
     }
 
     [Test]
@@ -752,25 +752,35 @@ public class CommandHistoryAndCompletionTests
         s.ExecuteCommand("w", out _);
         s.ExecuteCommand("w", out _);
 
-        Assert.That(s.HistoryRecall(-1), Is.EqualTo("w"));
-        Assert.That(s.HistoryRecall(-1), Is.Null, "only one w was kept");
+        Assert.That(s.HistoryRecall(-1, ""), Is.EqualTo("w"));
+        Assert.That(s.HistoryRecall(-1, "w"), Is.Null, "only one w was kept");
     }
 
     [Test]
-    public void Down_past_most_recent_returns_to_empty_buffer()
+    public void Down_past_newest_restores_the_in_progress_line()
     {
+        // #54: Up stashes the in-progress buffer; Down past newest restores it (bash behavior).
         var s = NewSession();
         s.ExecuteCommand("w", out _);
 
-        s.HistoryRecall(-1);
-        Assert.That(s.HistoryRecall(+1), Is.EqualTo(""), "down past newest restores the empty in-progress line");
+        s.HistoryRecall(-1, "col");            // typed "col", pressed up → recalls "w", stashes "col"
+        Assert.That(s.HistoryRecall(+1, "w"), Is.EqualTo("col"), "down past newest restores what I was typing");
+    }
+
+    [Test]
+    public void Down_past_newest_with_empty_in_progress_returns_empty()
+    {
+        var s = NewSession();
+        s.ExecuteCommand("w", out _);
+        s.HistoryRecall(-1, "");
+        Assert.That(s.HistoryRecall(+1, "w"), Is.EqualTo(""), "empty in-progress restores to empty");
     }
 
     [Test]
     public void Up_on_empty_history_returns_null()
     {
         var s = NewSession();
-        Assert.That(s.HistoryRecall(-1), Is.Null);
+        Assert.That(s.HistoryRecall(-1, ""), Is.Null);
     }
 
     // --- completion -------------------------------------------------------

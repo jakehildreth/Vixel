@@ -427,14 +427,27 @@ public sealed class EditorSession
     private static readonly string[] CommandNames =
         ["w", "q", "q!", "wq", "e", "e!", "new", "new!", "resize", "color", "export", "clear", "%d", "star", "help"];
 
+    private string? _stashedBuffer; // in-progress command line, stashed on first Up (#54)
+
     /// <summary>Recalls a history entry: -1 = older (up), +1 = newer (down). Null = no entry that way.
-    /// Past the newest returns the empty in-progress line.</summary>
-    public string? HistoryRecall(int direction)
+    /// currentBuffer is the line being typed; it is stashed on the first Up and restored when
+    /// returning past the newest entry (bash behavior).</summary>
+    public string? HistoryRecall(int direction, string currentBuffer)
     {
+        if (_historyIndex == _commandHistory.Count && direction < 0)
+            _stashedBuffer = currentBuffer; // leaving the in-progress line: stash it
+
         var next = _historyIndex + direction;
         if (next < 0 || next > _commandHistory.Count) return null;
         _historyIndex = next;
-        return _historyIndex == _commandHistory.Count ? "" : _commandHistory[_historyIndex];
+
+        if (_historyIndex == _commandHistory.Count)
+        {
+            var restored = _stashedBuffer ?? "";
+            _stashedBuffer = null;
+            return restored;
+        }
+        return _commandHistory[_historyIndex];
     }
 
     /// <summary>Tab-completion. Returns the buffer after applying the longest common prefix
@@ -680,7 +693,7 @@ public sealed class CanvasView : View
             else if (key == Key.End) { _s.CommandCursor = _s.CommandBuffer.Length; }
             else if (key == Key.CursorUp)
             {
-                if (_s.HistoryRecall(-1) is { } recalled)
+                if (_s.HistoryRecall(-1, _s.CommandBuffer) is { } recalled)
                 {
                     _s.CommandBuffer = recalled;
                     _s.CommandCursor = recalled.Length;
@@ -688,7 +701,7 @@ public sealed class CanvasView : View
             }
             else if (key == Key.CursorDown)
             {
-                if (_s.HistoryRecall(+1) is { } recalled)
+                if (_s.HistoryRecall(+1, _s.CommandBuffer) is { } recalled)
                 {
                     _s.CommandBuffer = recalled;
                     _s.CommandCursor = recalled.Length;
