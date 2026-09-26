@@ -380,8 +380,13 @@ public sealed class EditorSession
     public bool ExecuteCommand(string command, out bool quit)
     {
         quit = false;
-        var parts = command.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var trimmed = command.Trim();
+        var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 0) return true;
+
+        if (trimmed.Length > 0 && (_commandHistory.Count == 0 || _commandHistory[^1] != trimmed))
+            _commandHistory.Add(trimmed); // consecutive-dedup
+        _historyIndex = _commandHistory.Count;
 
         try
         {
@@ -392,6 +397,73 @@ public sealed class EditorSession
             Message = $"error: {e.Message}";
             return true;
         }
+    }
+
+    // --- command history + completion -------------------------------------
+
+    private readonly List<string> _commandHistory = [];
+    private int _historyIndex; // one past the newest entry when not recalling
+
+    private static readonly string[] CommandNames =
+        ["w", "q", "q!", "wq", "e", "e!", "new", "new!", "resize", "color", "export", "clear", "%d", "star", "help"];
+
+    /// <summary>Recalls a history entry: -1 = older (up), +1 = newer (down). Null = no entry that way.
+    /// Past the newest returns the empty in-progress line.</summary>
+    public string? HistoryRecall(int direction)
+    {
+        var next = _historyIndex + direction;
+        if (next < 0 || next > _commandHistory.Count) return null;
+        _historyIndex = next;
+        return _historyIndex == _commandHistory.Count ? "" : _commandHistory[_historyIndex];
+    }
+
+    /// <summary>Tab-completion. Returns the buffer after applying the longest common prefix
+    /// plus the candidate list to display (empty when the match was unique or there were none).</summary>
+    public (string Completed, IReadOnlyList<string> Matches) CompleteCommand(string buffer)
+    {
+        var sp = buffer.IndexOf(' ');
+        var word = sp < 0 ? buffer : buffer[(sp + 1)..];
+        var prefix = sp < 0 ? "" : buffer[..(sp + 1)];
+        var cmd = sp < 0 ? buffer : buffer[..sp];
+
+        string[] candidates =
+            sp < 0
+                ? CommandNames.Where(c => c.StartsWith(word, StringComparison.OrdinalIgnoreCase)).ToArray()
+                : cmd is "e" or "e!" or "w" or "export"
+                    ? PathCompletions(word).ToArray()
+                    : [];
+
+        if (candidates.Length == 0) return (buffer, []);
+        var completed = prefix + LongestCommonPrefix(candidates);
+        return candidates.Length == 1
+            ? (prefix + candidates[0] + (sp < 0 ? " " : ""), [])
+            : (completed, candidates);
+    }
+
+    private static IEnumerable<string> PathCompletions(string partial)
+    {
+        var dirPart = System.IO.Path.GetDirectoryName(partial) ?? "";
+        var filePart = System.IO.Path.GetFileName(partial);
+        var fullDir = dirPart.Length == 0 ? "." : ExpandPath(dirPart);
+        if (!Directory.Exists(fullDir)) yield break;
+        foreach (var entry in Directory.EnumerateFileSystemEntries(fullDir, filePart + "*"))
+        {
+            var name = System.IO.Path.GetFileName(entry);
+            var isDir = Directory.Exists(entry);
+            yield return (dirPart.Length == 0 ? "" : dirPart + "/") + name + (isDir ? "/" : "");
+        }
+    }
+
+    private static string LongestCommonPrefix(string[] items)
+    {
+        var lcp = items[0];
+        foreach (var item in items.Skip(1))
+        {
+            var i = 0;
+            while (i < lcp.Length && i < item.Length && char.ToLowerInvariant(lcp[i]) == char.ToLowerInvariant(item[i])) i++;
+            lcp = lcp[..i];
+        }
+        return lcp;
     }
 
     /// <summary>Expands a leading ~ to the user's home directory.</summary>
@@ -569,6 +641,29 @@ public sealed class CanvasView : View
             }
             else if (key == Key.Home) { _s.CommandCursor = 0; }
             else if (key == Key.End) { _s.CommandCursor = _s.CommandBuffer.Length; }
+            else if (key == Key.CursorUp)
+            {
+                if (_s.HistoryRecall(-1) is { } recalled)
+                {
+                    _s.CommandBuffer = recalled;
+                    _s.CommandCursor = recalled.Length;
+                }
+            }
+            else if (key == Key.CursorDown)
+            {
+                if (_s.HistoryRecall(+1) is { } recalled)
+                {
+                    _s.CommandBuffer = recalled;
+                    _s.CommandCursor = recalled.Length;
+                }
+            }
+            else if (key == Key.Tab)
+            {
+                var (completed, matches) = _s.CompleteCommand(_s.CommandBuffer);
+                _s.CommandBuffer = completed;
+                _s.CommandCursor = completed.Length;
+                _s.Message = matches.Count > 0 ? string.Join("  ", matches) : _s.Message;
+            }
             else if (key == Key.Backspace && _s.CommandCursor > 0)
             {
                 _s.CommandBuffer = _s.CommandBuffer.Remove(_s.CommandCursor - 1, 1);
