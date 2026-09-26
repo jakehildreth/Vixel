@@ -282,6 +282,35 @@ public class SessionTests
     }
 
     [Test]
+    public void Wq_with_failed_save_does_not_quit()
+    {
+        // Regression for #52: :wq quit unconditionally even when :w threw.
+        var s = NewSession();
+        s.Stamp(); // dirty
+        s.ExecuteCommand("wq /nonexistent-dir-cannot-exist/file.vixel", out var quit);
+        Assert.That(quit, Is.False, "save failed — must not quit and lose the work");
+        Assert.That(s.Message, Does.Contain("error").Or.Contain("not"), "error surfaced");
+    }
+
+    [Test]
+    public void Wq_with_successful_save_quits()
+    {
+        var temp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"vixel-test-{Guid.NewGuid()}.vixel");
+        try
+        {
+            var s = NewSession();
+            s.Stamp();
+            s.ExecuteCommand($"wq {temp}", out var quit);
+            Assert.Multiple(() =>
+            {
+                Assert.That(quit, Is.True, "save landed — quit");
+                Assert.That(File.Exists(temp), Is.True);
+            });
+        }
+        finally { File.Delete(temp); }
+    }
+
+    [Test]
     public void New_with_zero_dimensions_is_rejected()
     {
         // Regression for #40: :new 0x0 used to throw or create a degenerate canvas.
