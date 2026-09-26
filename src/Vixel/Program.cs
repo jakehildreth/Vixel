@@ -571,8 +571,9 @@ public sealed class EditorSession
                 quit = true;
                 return true;
             case "wq":
-                ExecuteCommand("w", out _);
-                quit = true;
+                ExecuteCommand(parts.Length > 1 ? $"w {parts[1]}" : "w", out _);
+                // quit only when the write landed; a failed :w leaves unsaved changes and must not quit (#52)
+                if (!HasUnsavedChanges) quit = true;
                 return true;
             case "e" when parts.Length > 1:
             case "e!" when parts.Length > 1:
