@@ -143,13 +143,13 @@ public sealed class EditorSession
     public Palette Palette = new();
     public string Name;
     public string? Path;
-    public Mode CurrentMode = Mode.Normal;
+    public Mode CurrentMode { get; internal set; } = Mode.Normal;
     public readonly UndoStack History = new();
 
-    public int CursorX;
-    public int CursorY;
-    public int CurrentColorIndex;
-    public bool Erasing;
+    public int CursorX { get; internal set; }
+    public int CursorY { get; internal set; }
+    public int CurrentColorIndex { get; internal set; }
+    public bool Erasing { get; internal set; }
     private int _brushSize = 1;
     /// <summary>Brush size 1-9. Square allows even sizes (even N×N focuses 1 up/left of center); circle skips 2.</summary>
     public int BrushSize
@@ -167,8 +167,8 @@ public sealed class EditorSession
         if (CircleBrush && next == 2) next += step;
         _brushSize = Math.Clamp(next, 1, 9);
     }
-    public bool CircleBrush;
-    public int PalettePage;
+    public bool CircleBrush { get; internal set; }
+    public int PalettePage { get; internal set; }
     public bool Dirty;
 
     public int AnchorX; // two-point anchor
@@ -187,6 +187,69 @@ public sealed class EditorSession
 
     /// <summary>Help scroll offset (Mode.Help only).</summary>
     public int HelpScroll;
+
+    // --- command-line editing (Mode.Command) ---------------------------------
+
+    /// <summary>Enters command mode with an empty buffer.</summary>
+    public void EnterCommand() { CurrentMode = Mode.Command; CommandBuffer = ""; CommandCursor = 0; StatusChanged?.Invoke(); }
+
+    /// <summary>Inserts a character at the cursor.</summary>
+    public void InsertCommandChar(char c)
+    {
+        CommandBuffer = CommandBuffer.Insert(CommandCursor, c.ToString());
+        CommandCursor++;
+    }
+
+    /// <summary>Moves the cursor by delta, clamped to the buffer.</summary>
+    public void MoveCommandCursor(int delta) => CommandCursor = Math.Clamp(CommandCursor + delta, 0, CommandBuffer.Length);
+
+    /// <summary>Sets the cursor to an absolute position, clamped.</summary>
+    public void SetCommandCursor(int position) => CommandCursor = Math.Clamp(position, 0, CommandBuffer.Length);
+
+    /// <summary>Deletes the character before the cursor (backspace).</summary>
+    public void CommandBackspace()
+    {
+        if (CommandCursor <= 0) return;
+        CommandBuffer = CommandBuffer.Remove(CommandCursor - 1, 1);
+        CommandCursor--;
+    }
+
+    /// <summary>Deletes the character at the cursor (forward delete).</summary>
+    public void CommandDelete()
+    {
+        if (CommandCursor >= CommandBuffer.Length) return;
+        CommandBuffer = CommandBuffer.Remove(CommandCursor, 1);
+    }
+
+    /// <summary>Runs the buffer as a command, clears it, and returns to Normal unless the command set a mode.</summary>
+    public void SubmitCommand(out bool quit)
+    {
+        ExecuteCommand(CommandBuffer, out quit);
+        CommandBuffer = "";
+        CommandCursor = 0;
+        if (CurrentMode == Mode.Command) CurrentMode = Mode.Normal; // commands may switch modes (e.g. :help)
+    }
+
+    /// <summary>Abandons the buffer and returns to Normal.</summary>
+    public void CancelCommand() { CommandBuffer = ""; CommandCursor = 0; CurrentMode = Mode.Normal; StatusChanged?.Invoke(); }
+
+    /// <summary>Recalls history into the buffer; returns false when no entry that direction.</summary>
+    public bool RecallCommand(int direction)
+    {
+        if (HistoryRecall(direction, CommandBuffer) is not { } recalled) return false;
+        CommandBuffer = recalled;
+        CommandCursor = recalled.Length;
+        return true;
+    }
+
+    /// <summary>Tab-completes the buffer; lists candidates in Message when ambiguous.</summary>
+    public void TabCompleteCommand()
+    {
+        var (completed, matches) = CompleteCommand(CommandBuffer);
+        CommandBuffer = completed;
+        CommandCursor = completed.Length;
+        if (matches.Count > 0) Message = string.Join("  ", matches);
+    }
 
     public EditorSession(string? path)
     {
@@ -669,65 +732,20 @@ public sealed class CanvasView : View
         {
             if (key == Key.Enter)
             {
-                _s.ExecuteCommand(_s.CommandBuffer, out var quit);
-                _s.CommandBuffer = "";
-                _s.CommandCursor = 0;
-                if (_s.CurrentMode == EditorSession.Mode.Command) _s.CurrentMode = EditorSession.Mode.Normal; // commands may switch modes (e.g. :help)
+                _s.SubmitCommand(out var quit);
                 if (quit) App?.RequestStop();
             }
-            else if (key == Key.Esc)
-            {
-                _s.CommandBuffer = "";
-                _s.CommandCursor = 0;
-                _s.CurrentMode = EditorSession.Mode.Normal;
-            }
-            else if (key == Key.CursorLeft && _s.CommandCursor > 0)
-            {
-                _s.CommandCursor--;
-            }
-            else if (key == Key.CursorRight && _s.CommandCursor < _s.CommandBuffer.Length)
-            {
-                _s.CommandCursor++;
-            }
-            else if (key == Key.Home) { _s.CommandCursor = 0; }
-            else if (key == Key.End) { _s.CommandCursor = _s.CommandBuffer.Length; }
-            else if (key == Key.CursorUp)
-            {
-                if (_s.HistoryRecall(-1, _s.CommandBuffer) is { } recalled)
-                {
-                    _s.CommandBuffer = recalled;
-                    _s.CommandCursor = recalled.Length;
-                }
-            }
-            else if (key == Key.CursorDown)
-            {
-                if (_s.HistoryRecall(+1, _s.CommandBuffer) is { } recalled)
-                {
-                    _s.CommandBuffer = recalled;
-                    _s.CommandCursor = recalled.Length;
-                }
-            }
-            else if (key == Key.Tab)
-            {
-                var (completed, matches) = _s.CompleteCommand(_s.CommandBuffer);
-                _s.CommandBuffer = completed;
-                _s.CommandCursor = completed.Length;
-                _s.Message = matches.Count > 0 ? string.Join("  ", matches) : _s.Message;
-            }
-            else if (key == Key.Backspace && _s.CommandCursor > 0)
-            {
-                _s.CommandBuffer = _s.CommandBuffer.Remove(_s.CommandCursor - 1, 1);
-                _s.CommandCursor--;
-            }
-            else if (key == Key.Delete && _s.CommandCursor < _s.CommandBuffer.Length)
-            {
-                _s.CommandBuffer = _s.CommandBuffer.Remove(_s.CommandCursor, 1);
-            }
-            else if (key.TryGetPrintableRune(out var rune) && rune.Value != 0)
-            {
-                _s.CommandBuffer = _s.CommandBuffer.Insert(_s.CommandCursor, ((char)rune.Value).ToString());
-                _s.CommandCursor++;
-            }
+            else if (key == Key.Esc) { _s.CancelCommand(); }
+            else if (key == Key.CursorLeft) { _s.MoveCommandCursor(-1); }
+            else if (key == Key.CursorRight) { _s.MoveCommandCursor(+1); }
+            else if (key == Key.Home) { _s.SetCommandCursor(0); }
+            else if (key == Key.End) { _s.SetCommandCursor(_s.CommandBuffer.Length); }
+            else if (key == Key.CursorUp) { _s.RecallCommand(-1); }
+            else if (key == Key.CursorDown) { _s.RecallCommand(+1); }
+            else if (key == Key.Tab) { _s.TabCompleteCommand(); }
+            else if (key == Key.Backspace) { _s.CommandBackspace(); }
+            else if (key == Key.Delete) { _s.CommandDelete(); }
+            else if (key.TryGetPrintableRune(out var rune) && rune.Value != 0) { _s.InsertCommandChar((char)rune.Value); }
             SetNeedsDraw();
             _s.StatusChanged?.Invoke();
             return true;
@@ -769,7 +787,7 @@ public sealed class CanvasView : View
         else if (key == Key.Enter.WithShift && _s.CurrentMode == EditorSession.Mode.Rect) _s.CommitTwoPoint(shifted: true);
         else if (key == Key.U && _s.CurrentMode == EditorSession.Mode.Normal) _s.Undo();
         else if (key == Key.R.WithCtrl && _s.CurrentMode == EditorSession.Mode.Normal) _s.Redo();
-        else if (key.TryGetPrintableRune(out var colon) && colon.Value == ':') { _s.CurrentMode = EditorSession.Mode.Command; _s.CommandBuffer = ""; _s.CommandCursor = 0; }
+        else if (key.TryGetPrintableRune(out var colon) && colon.Value == ':') { _s.EnterCommand(); }
         else if (key.TryGetPrintableRune(out var digit) && digit.Value >= '1' && digit.Value <= '9') SetPaletteSlot(digit.Value - '1');
         else if (key.TryGetPrintableRune(out var minus) && minus.Value is '-' or '_') { _s.AdjustBrush(-1); }
         else if (key.TryGetPrintableRune(out var plus) && plus.Value is '=' or '+') { _s.AdjustBrush(+1); }
