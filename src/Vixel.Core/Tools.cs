@@ -39,7 +39,9 @@ public static class Tools
         return canvas.SetPixels(writes);
     }
 
-    /// <summary>Brush footprint centered on (x, y); square N×N or inscribed circle.</summary>
+    /// <summary>Brush footprint centered on (x, y); square N×N or inscribed circle.
+    /// Even-size circles are approximate: the extent leans one pixel down-right (focus up-left),
+    /// so an even circle reads slightly heavier toward bottom-right. Accepted as character (#58).</summary>
     public static IEnumerable<(int X, int Y)> Footprint(int x, int y, int size, bool circle)
     {
         if (size <= 1)

@@ -126,10 +126,10 @@ public static class AseFormat
         {
             using var s = new MemoryStream();
             using var w = new BinaryWriter(s);
-            var count = Math.Max(p.Colors.Count, 0);
+            var count = p.Colors.Count;
             w.Write(count);                // DWORD palette size
             w.Write(0);                    // DWORD first index
-            w.Write(count - 1 < 0 ? 0 : count - 1); // DWORD last index
+            w.Write(count > 0 ? count - 1 : 0); // DWORD last index
             w.Write(new byte[8]);          // reserved
             foreach (var c in p.Colors)
             {

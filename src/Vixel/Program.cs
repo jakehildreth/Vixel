@@ -151,7 +151,7 @@ public sealed class EditorSession
     public int CurrentColorIndex;
     public bool Erasing;
     private int _brushSize = 1;
-    /// <summary>Brush size on the odd ladder 1/3/5/7/9 — even sizes have no center pixel.</summary>
+    /// <summary>Brush size 1-9. Square allows even sizes (even N×N focuses 1 up/left of center); circle skips 2.</summary>
     public int BrushSize
     {
         get => _brushSize;
@@ -253,7 +253,9 @@ public sealed class EditorSession
         foreach (var hex in pico8) Palette.AddColor(Rgb.FromHex(hex));
     }
 
-    /// <summary>Content fingerprint: dimensions + pixel indices + palette. Compared at :q.</summary>
+    /// <summary>Content fingerprint: dimensions + pixel indices + palette hexes. Compared at :q.
+    /// Compares palette *indices* — safe only while Palette is append-only (no color redefinition).
+    /// If palette editing ever lands, this fingerprint must capture resolved colors too (#61).</summary>
     private string ContentSnapshot()
     {
         var sb = new StringBuilder();
@@ -375,7 +377,7 @@ public sealed class EditorSession
                 History.Push(Tools.Paste(Canvas, Clipboard, CursorX, CursorY));
                 break;
         }
-        Dirty = CurrentMode is Mode.Line or Mode.Rect or Mode.Paste ? true : Dirty;
+        if (CurrentMode is Mode.Line or Mode.Rect or Mode.Paste) Dirty = true;
         CurrentMode = Mode.Normal;
     }
 
