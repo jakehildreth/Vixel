@@ -809,7 +809,6 @@ public static class AseFormat
 
         var canvas = new Canvas(width, height);
         var palette = new Palette();
-        Rgb[]? paletteEntries = null;
 
         for (var f = 0; f < frames; f++)
         {
@@ -831,10 +830,6 @@ public static class AseFormat
                 if (f == 0 && chunkType == 0x2005) // cel — first frame only (flatten)
                 {
                     ReadCel(reader, canvas, palette);
-                }
-                else if (f == 0 && chunkType == 0x2019) // palette
-                {
-                    paletteEntries = ReadPaletteChunk(reader);
                 }
 
                 reader.BaseStream.Seek(chunkStart + chunkSize, SeekOrigin.Begin);
@@ -878,27 +873,4 @@ public static class AseFormat
         }
     }
 
-    private static Rgb[] ReadPaletteChunk(BinaryReader reader)
-    {
-        var size = reader.ReadInt32();
-        var first = reader.ReadInt32();
-        reader.ReadInt32(); // last
-        reader.ReadBytes(8);
-        var entries = new Rgb[size];
-        for (var i = first; i < size; i++)
-        {
-            var flags = reader.ReadUInt16();
-            var r = reader.ReadByte();
-            var g = reader.ReadByte();
-            var b = reader.ReadByte();
-            reader.ReadByte(); // alpha
-            if ((flags & 1) != 0) // has name
-            {
-                var len = reader.ReadUInt16();
-                reader.ReadBytes(len);
-            }
-            entries[i] = new Rgb(r, g, b);
-        }
-        return entries;
-    }
 }

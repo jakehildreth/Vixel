@@ -509,7 +509,7 @@ public sealed class EditorSession
         {
             case "w":
                 var target = parts.Length > 1 ? ExpandPath(parts[1]) : Path ?? Name + ".vixel";
-                File.WriteAllText(target, VixelFile.Save(Canvas, Palette, Name, _created));
+                AtomicWrite.WriteAllText(target, VixelFile.Save(Canvas, Palette, Name, _created));
                 Path = target;
                 _savedSnapshot = ContentSnapshot();
                 Dirty = false;
@@ -566,7 +566,7 @@ public sealed class EditorSession
             case "export" when parts.Length > 1:
                 var scale = parts.Length > 2 && int.TryParse(parts[2], out var s) ? s : 1;
                 var exportTarget = ExpandPath(parts[1]);
-                File.WriteAllBytes(exportTarget, PngFormat.Export(Canvas, Palette, scale));
+                AtomicWrite.WriteAllBytes(exportTarget, PngFormat.Export(Canvas, Palette, scale));
                 Message = $"exported {exportTarget} ×{scale}";
                 return true;
             case "new":

@@ -102,7 +102,6 @@ public class CanvasTests
             Assert.That(canvas.Width, Is.EqualTo(6));
             Assert.That(canvas[3, 3], Is.EqualTo(7));
             Assert.That(canvas[5, 5], Is.Null);
-            Assert.That(change.Touched.Count, Is.GreaterThan(0), "resize must record an undoable change");
         });
     }
 
@@ -136,6 +135,17 @@ public class CanvasTests
             Assert.That(canvas.Width, Is.EqualTo(4));
             Assert.That(canvas[3, 3], Is.EqualTo(7));
         });
+    }
+
+    [Test]
+    public void Resize_grow_records_no_null_to_null_noop_touches()
+    {
+        // Regression for #30: grow used to record a no-op (null→null) touch for every exposed cell.
+        var canvas = new Canvas(2, 2);
+        canvas.SetPixel(1, 1, 5);
+        var change = canvas.Resize(512, 512);
+
+        Assert.That(change.Touched, Is.Empty, "grow onto transparent cells has nothing meaningful to undo pixel-wise");
     }
 }
 
@@ -249,5 +259,30 @@ public class QuantizerTests
         {
             Assert.That(Xterm256.ToIndex(Xterm256.Palette[i]), Is.EqualTo(i), $"palette[{i}]");
         }
+    }
+}
+
+[TestFixture]
+public class AtomicWriteTests
+{
+    [Test]
+    public void WriteAllText_leaves_target_and_no_temp_file()
+    {
+        var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"vixel-test-{Guid.NewGuid()}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var target = System.IO.Path.Combine(dir, "a.txt");
+            AtomicWrite.WriteAllText(target, "hello");
+            Assert.Multiple(() =>
+            {
+                Assert.That(File.ReadAllText(target), Is.EqualTo("hello"));
+                Assert.That(File.Exists(target + ".tmp"), Is.False, "temp file moved away");
+            });
+
+            AtomicWrite.WriteAllText(target, "overwritten");
+            Assert.That(File.ReadAllText(target), Is.EqualTo("overwritten"), "overwrite replaces in place");
+        }
+        finally { Directory.Delete(dir, recursive: true); }
     }
 }

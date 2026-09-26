@@ -78,6 +78,6 @@ public sealed class VixelConfig
     private void Save()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        File.WriteAllText(_path, JsonSerializer.Serialize(_state));
+        AtomicWrite.WriteAllText(_path, JsonSerializer.Serialize(_state));
     }
 }
