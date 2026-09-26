@@ -98,8 +98,8 @@ public sealed class Canvas
 
     public void SetPixel(int x, int y, int? paletteIndex)
     {
-        if (x < 0 || x >= Width || y < 0 || y >= Height)
-            throw new ArgumentOutOfRangeException(nameof(x));
+        if (x < 0 || x >= Width) throw new ArgumentOutOfRangeException(nameof(x));
+        if (y < 0 || y >= Height) throw new ArgumentOutOfRangeException(nameof(y));
         _pixels[x, y] = paletteIndex;
     }
 

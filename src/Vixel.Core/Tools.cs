@@ -177,6 +177,16 @@ public sealed class UndoStack
         _undo.Add(change);
     }
 
+    /// <summary>Drops all undo/redo state. Required on :e/:new so a change recorded
+    /// against the previous canvas cannot be applied to the replacement.</summary>
+    public void Clear()
+    {
+        _undo.Clear();
+        _redo.Clear();
+        _openStroke = null;
+        _strokeCanvas = null;
+    }
+
     /// <summary>Replays steps onto a fresh canvas (time-lapse). upToStep is exclusive-end count.</summary>
     public void ReplayOnto(Canvas canvas, int upToStep)
     {

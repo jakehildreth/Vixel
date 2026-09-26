@@ -22,7 +22,7 @@ public class VixelFileTests
     {
         var (canvas, palette) = SampleArt();
         var json = VixelFile.Save(canvas, palette, "test");
-        var (loadedCanvas, loadedPalette, name) = VixelFile.Load(json);
+        var (loadedCanvas, loadedPalette, name, _) = VixelFile.Load(json);
 
         Assert.Multiple(() =>
         {
@@ -60,6 +60,34 @@ public class VixelFileTests
     {
         var json = """{"version": 99, "width": 1, "height": 1, "palette": [], "rows": [[null]]}""";
         Assert.Throws<InvalidDataException>(() => VixelFile.Load(json));
+    }
+
+    [Test]
+    public void Save_preserves_created_timestamp_across_resaves()
+    {
+        // Regression for #32: meta.created was rewritten on every save.
+        var (canvas, palette) = SampleArt();
+        var first = VixelFile.Save(canvas, palette, "x", created: new DateTimeOffset(2020, 1, 2, 3, 4, 5, TimeSpan.Zero));
+        var second = VixelFile.Save(canvas, palette, "x", created: new DateTimeOffset(2020, 1, 2, 3, 4, 5, TimeSpan.Zero));
+        Assert.Multiple(() =>
+        {
+            Assert.That(first, Does.Contain("2020-01-02"), "created preserved");
+            Assert.That(second, Does.Contain("2020-01-02"), "created preserved on resave");
+        });
+    }
+
+    [Test]
+    public void Load_rejects_palette_index_out_of_range()
+    {
+        // Regression for #28: a hand-edited .vixel with a palette index >= palette count
+        // used to load, then crash at render time indexing Palette.Colors[i].
+        const string json = """
+            { "version": 1, "name": "bad", "width": 2, "height": 1,
+              "palette": ["#000000"],
+              "rows": [[0, 5]] }
+            """;
+        var e = Assert.Throws<InvalidDataException>(() => VixelFile.Load(json));
+        Assert.That(e!.Message, Does.Contain("palette"));
     }
 
     [Test]
@@ -161,6 +189,39 @@ public class PiskelTests
         var (loaded, _) = PiskelFormat.Import(json);
         Assert.That(loaded.Width, Is.EqualTo(1)); // parsed without trying to model frames
     }
+
+    [Test]
+    public void Import_rejects_invalid_json()
+    {
+        Assert.Throws<InvalidDataException>(() => PiskelFormat.Import("not json"));
+    }
+
+    [Test]
+    public void Import_rejects_missing_piskel_key()
+    {
+        Assert.Throws<InvalidDataException>(() => PiskelFormat.Import("""{"other":{}}"""));
+    }
+
+    [Test]
+    public void Import_rejects_missing_dimensions()
+    {
+        const string json = """{"piskel":{"frames":[]}}""";
+        Assert.Throws<InvalidDataException>(() => PiskelFormat.Import(json));
+    }
+
+    [Test]
+    public void Import_rejects_frame_without_dataUri()
+    {
+        const string json = """{"piskel":{"width":1,"height":1,"frames":[{}]}}""";
+        Assert.Throws<InvalidDataException>(() => PiskelFormat.Import(json));
+    }
+
+    [Test]
+    public void Import_rejects_bad_base64()
+    {
+        const string json = """{"piskel":{"width":1,"height":1,"frames":[{"dataUri":"data:image/png;base64,!!!"}]}}""";
+        Assert.Throws<InvalidDataException>(() => PiskelFormat.Import(json));
+    }
 }
 
 [TestFixture]
@@ -186,6 +247,35 @@ public class PxTests
             Assert.That(loaded[0, 0], Is.Null);
         });
     }
+    [Test]
+    public void Import_rejects_truncated_at_every_length()
+    {
+        // Regression for #29: a truncated .px must throw InvalidDataException, not
+        // IndexOutOfRangeException. Sweep every prefix of a valid file.
+        var palette = new Palette();
+        var green = palette.AddColor(new Rgb(0, 255, 0));
+        var canvas = new Canvas(3, 2);
+        canvas.SetPixel(2, 0, green);
+        var bytes = PxFormat.Export(canvas, palette);
+
+        for (var len = 0; len < bytes.Length; len++)
+        {
+            var truncated = bytes[..len];
+            try
+            {
+                PxFormat.Import(truncated);
+            }
+            catch (InvalidDataException)
+            {
+                // expected
+            }
+            catch (Exception e)
+            {
+                Assert.Fail($"length {len}: expected InvalidDataException, got {e.GetType().Name}: {e.Message}");
+            }
+        }
+    }
+
 }
 
 [TestFixture]
