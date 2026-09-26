@@ -824,3 +824,134 @@ public class CommandHistoryAndCompletionTests
         finally { Directory.Delete(dir, recursive: true); }
     }
 }
+
+[TestFixture]
+public class CommandEditingTests
+{
+    private static EditorSession NewSession() => new(path: null);
+
+    [Test]
+    public void EnterCommand_sets_mode_and_empty_buffer()
+    {
+        var s = NewSession();
+        s.EnterCommand();
+        Assert.Multiple(() =>
+        {
+            Assert.That(s.CurrentMode, Is.EqualTo(EditorSession.Mode.Command));
+            Assert.That(s.CommandBuffer, Is.EqualTo(""));
+            Assert.That(s.CommandCursor, Is.EqualTo(0));
+        });
+    }
+
+    [Test]
+    public void InsertText_appends_at_cursor_and_advances()
+    {
+        var s = NewSession();
+        s.EnterCommand();
+        s.InsertCommandChar('w');
+        s.InsertCommandChar('q');
+        Assert.Multiple(() =>
+        {
+            Assert.That(s.CommandBuffer, Is.EqualTo("wq"));
+            Assert.That(s.CommandCursor, Is.EqualTo(2));
+        });
+    }
+
+    [Test]
+    public void Insert_in_the_middle_of_the_buffer()
+    {
+        var s = NewSession();
+        s.EnterCommand();
+        s.InsertCommandChar('w');
+        s.InsertCommandChar('q');
+        s.MoveCommandCursor(-1); // between w and q
+        s.InsertCommandChar('!');
+        Assert.That(s.CommandBuffer, Is.EqualTo("w!q"));
+    }
+
+    [Test]
+    public void Backspace_removes_before_cursor()
+    {
+        var s = NewSession();
+        s.EnterCommand();
+        s.InsertCommandChar('w');
+        s.InsertCommandChar('q');
+        s.CommandBackspace();
+        Assert.Multiple(() =>
+        {
+            Assert.That(s.CommandBuffer, Is.EqualTo("w"));
+            Assert.That(s.CommandCursor, Is.EqualTo(1));
+        });
+    }
+
+    [Test]
+    public void Delete_removes_at_cursor()
+    {
+        var s = NewSession();
+        s.EnterCommand();
+        s.InsertCommandChar('w');
+        s.InsertCommandChar('q');
+        s.MoveCommandCursor(-1);
+        s.CommandDelete();
+        Assert.That(s.CommandBuffer, Is.EqualTo("w"));
+    }
+
+    [Test]
+    public void SubmitCommand_executes_and_returns_to_normal_unless_command_changed_mode()
+    {
+        var s = NewSession();
+        s.EnterCommand();
+        foreach (var c in "clear") s.InsertCommandChar(c);
+        s.SubmitCommand(out var quit);
+        Assert.Multiple(() =>
+        {
+            Assert.That(quit, Is.False);
+            Assert.That(s.CurrentMode, Is.EqualTo(EditorSession.Mode.Normal), "command did not switch modes");
+            Assert.That(s.CommandBuffer, Is.EqualTo(""), "buffer cleared after submit");
+        });
+    }
+
+    [Test]
+    public void SubmitCommand_respects_quit_and_keeps_command_set_mode()
+    {
+        var s = NewSession();
+        s.EnterCommand();
+        foreach (var c in "help") s.InsertCommandChar(c);
+        s.SubmitCommand(out var quit);
+        Assert.That(s.CurrentMode, Is.EqualTo(EditorSession.Mode.Help), ":help switches mode; session must not force Normal");
+    }
+
+    [Test]
+    public void CancelCommand_returns_to_normal_and_clears()
+    {
+        var s = NewSession();
+        s.EnterCommand();
+        s.InsertCommandChar('x');
+        s.CancelCommand();
+        Assert.Multiple(() =>
+        {
+            Assert.That(s.CurrentMode, Is.EqualTo(EditorSession.Mode.Normal));
+            Assert.That(s.CommandBuffer, Is.EqualTo(""));
+        });
+    }
+
+    [Test]
+    public void RecallCommand_into_buffer()
+    {
+        var s = NewSession();
+        s.ExecuteCommand("clear", out _);
+        s.EnterCommand();
+        Assert.That(s.RecallCommand(-1), Is.True);
+        Assert.That(s.CommandBuffer, Is.EqualTo("clear"));
+    }
+
+    [Test]
+    public void CompleteCommand_into_buffer_and_message()
+    {
+        var s = NewSession();
+        s.EnterCommand();
+        foreach (var c in "cle") s.InsertCommandChar(c);
+        s.TabCompleteCommand();
+        Assert.That(s.CommandBuffer, Is.EqualTo("clear "), "unique completion fills buffer");
+    }
+}
