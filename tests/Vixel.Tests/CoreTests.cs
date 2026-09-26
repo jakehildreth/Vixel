@@ -299,4 +299,22 @@ public class AtomicWriteTests
         }
         finally { Directory.Delete(dir, recursive: true); }
     }
+    [Test]
+    public void WriteAllText_failure_leaves_no_tmp_litter()
+    {
+        // #55: if the write or move throws, the .tmp must not be left behind.
+        var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"vixel-test-{Guid.NewGuid()}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            // Force a write failure: target's parent does not exist, so the temp write throws.
+            var missing = System.IO.Path.Combine(dir, "nope", "a.txt");
+            Assert.Throws<DirectoryNotFoundException>(() => AtomicWrite.WriteAllText(missing, "x"));
+            Assert.That(Directory.EnumerateFiles(dir, "*.tmp", SearchOption.AllDirectories), Is.Empty,
+                "no .tmp litter after a failed write");
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+
 }
