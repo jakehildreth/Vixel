@@ -488,6 +488,19 @@ public sealed class EditorSession
         : path.StartsWith("~/") ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + path[1..]
         : path;
 
+    /// <summary>Parses "WxH" into dims clamped to 1..512. False when malformed or out of range.</summary>
+    private static bool TryParseDimensions(string arg, out int w, out int h)
+    {
+        w = h = 0;
+        var split = arg.Split('x');
+        if (split.Length != 2
+            || !int.TryParse(split[0], out var pw) || !int.TryParse(split[1], out var ph)
+            || pw < 1 || ph < 1) return false;
+        w = Math.Min(pw, 512);
+        h = Math.Min(ph, 512);
+        return true;
+    }
+
     /// <summary>Stars the repo via an authed gh CLI. Null when gh is missing, unauthed, or the call fails.</summary>
     private static string? StarViaGitHubCli()
     {
@@ -592,8 +605,8 @@ public sealed class EditorSession
                     Message = "unsaved changes — :new! to discard";
                     return true;
                 }
-                var w = parts.Length > 1 && int.TryParse(parts[1].Split('x')[0], out var nw) ? nw : 64;
-                var h = parts.Length > 1 && parts[1].Contains('x') && int.TryParse(parts[1].Split('x')[1], out var nh) ? nh : 32;
+                var w = parts.Length > 1 && TryParseDimensions(parts[1], out var nw, out _) ? nw : 64;
+                var h = parts.Length > 1 && TryParseDimensions(parts[1], out _, out var nh) ? nh : 32;
                 Canvas = new Canvas(Math.Min(w, 512), Math.Min(h, 512));
                 History.Clear(); // #25: undo of a change recorded against the previous canvas would corrupt this one
                 _created = null; // new file: fresh created timestamp on next save
@@ -603,9 +616,12 @@ public sealed class EditorSession
                 Message = $"new canvas {Canvas.Width}x{Canvas.Height}";
                 return true;
             case "resize" when parts.Length > 1:
-                var rw = int.Parse(parts[1].Split('x')[0]);
-                var rh = int.Parse(parts[1].Split('x')[1]);
-                History.Push(Canvas.Resize(Math.Min(rw, 512), Math.Min(rh, 512)));
+                if (!TryParseDimensions(parts[1], out var rw, out var rh))
+                {
+                    Message = "usage: :resize WxH (1-512)";
+                    return true;
+                }
+                History.Push(Canvas.Resize(rw, rh));
                 Dirty = true;
                 return true;
             default:

@@ -260,6 +260,20 @@ public class QuantizerTests
             Assert.That(Xterm256.ToIndex(Xterm256.Palette[i]), Is.EqualTo(i), $"palette[{i}]");
         }
     }
+
+    [Test]
+    public void Boundary_grays_quantize_to_nearest_ramp_step()
+    {
+        // Regression for #40: grays must land on the nearest ramp step. Ramp steps are
+        // 8,18,28,...,238; 127 and 128 both sit inside [123,133) so both map to step 128 (index 244).
+        Assert.Multiple(() =>
+        {
+            Assert.That(Xterm256.ToIndex(new Rgb(127, 127, 127)), Is.EqualTo(244), "127 rounds to ramp step 128");
+            Assert.That(Xterm256.ToIndex(new Rgb(128, 128, 128)), Is.EqualTo(244), "128 is ramp step 128");
+            Assert.That(Xterm256.ToIndex(new Rgb(0, 0, 0)), Is.EqualTo(16), "pure black is exact cube entry 16");
+            Assert.That(Xterm256.ToIndex(new Rgb(255, 255, 255)), Is.EqualTo(231), "pure white is exact cube entry 231");
+        });
+    }
 }
 
 [TestFixture]
