@@ -88,11 +88,35 @@ public class SessionTests
 
 
     [Test]
-    public void Command_help_sets_help_requested_flag()
+    public void Command_help_enters_help_mode()
     {
         var s = NewSession();
         s.ExecuteCommand("help", out _);
-        Assert.That(s.HelpRequested, Is.True);
+        Assert.That(s.CurrentMode, Is.EqualTo(EditorSession.Mode.Help));
+    }
+
+    [Test]
+    public void Help_scroll_clamps_at_zero_and_exits_clean()
+    {
+        var s = NewSession();
+        s.EnterHelp();
+        s.ScrollHelp(5);
+        Assert.That(s.HelpScroll, Is.EqualTo(5));
+        s.ScrollHelp(-10);
+        Assert.That(s.HelpScroll, Is.EqualTo(0), "clamped at top");
+        s.ExitHelp();
+        Assert.That(s.CurrentMode, Is.EqualTo(EditorSession.Mode.Normal));
+    }
+
+    [Test]
+    public void HelpView_max_scroll_matches_line_count()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(HelpView.MaxScroll(44), Is.EqualTo(1), "45 lines, 44-row viewport");
+            Assert.That(HelpView.MaxScroll(20), Is.EqualTo(25));
+            Assert.That(HelpView.MaxScroll(100), Is.EqualTo(0), "viewport taller than content: no scroll");
+        });
     }
 
     [Test]
