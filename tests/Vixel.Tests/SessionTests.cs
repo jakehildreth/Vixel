@@ -628,3 +628,92 @@ public class SessionTests
         "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAACFEgAAiAAAAAwAAAAAAAAAABAAAAAQAAAAzMzM/+bm5v8A" +
         "AAAADgAAAAAAAAAAABAAAAAQAAAAAAD//wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAEAAAABAAAA";
 }
+
+[TestFixture]
+public class CommandHistoryAndCompletionTests
+{
+    private static EditorSession NewSession() => new(path: null);
+
+    // --- history ----------------------------------------------------------
+
+    [Test]
+    public void Submitted_commands_are_recorded_and_recalled_with_up()
+    {
+        var s = NewSession();
+        s.ExecuteCommand("w", out _);
+        s.ExecuteCommand("clear", out _);
+
+        Assert.That(s.HistoryRecall(-1), Is.EqualTo("clear"), "up recalls most recent");
+        Assert.That(s.HistoryRecall(-1), Is.EqualTo("w"), "up again recalls the one before");
+    }
+
+    [Test]
+    public void Consecutive_duplicate_commands_are_deduped()
+    {
+        var s = NewSession();
+        s.ExecuteCommand("w", out _);
+        s.ExecuteCommand("w", out _);
+        s.ExecuteCommand("w", out _);
+
+        Assert.That(s.HistoryRecall(-1), Is.EqualTo("w"));
+        Assert.That(s.HistoryRecall(-1), Is.Null, "only one w was kept");
+    }
+
+    [Test]
+    public void Down_past_most_recent_returns_to_empty_buffer()
+    {
+        var s = NewSession();
+        s.ExecuteCommand("w", out _);
+
+        s.HistoryRecall(-1);
+        Assert.That(s.HistoryRecall(+1), Is.EqualTo(""), "down past newest restores the empty in-progress line");
+    }
+
+    [Test]
+    public void Up_on_empty_history_returns_null()
+    {
+        var s = NewSession();
+        Assert.That(s.HistoryRecall(-1), Is.Null);
+    }
+
+    // --- completion -------------------------------------------------------
+
+    [Test]
+    public void Tab_completes_a_unique_command_name()
+    {
+        var s = NewSession();
+        var (completed, matches) = s.CompleteCommand("cle");
+        Assert.Multiple(() =>
+        {
+            Assert.That(completed, Is.EqualTo("clear "), "unique command completes with a trailing space, ready for args");
+            Assert.That(matches, Is.Empty, "unique match completes without listing");
+        });
+    }
+
+    [Test]
+    public void Tab_completes_to_longest_common_prefix_and_lists_matches()
+    {
+        var s = NewSession();
+        var (completed, matches) = s.CompleteCommand("e");
+        Assert.Multiple(() =>
+        {
+            Assert.That(completed, Is.EqualTo("e"), "e vs export share only 'e'");
+            Assert.That(matches, Is.EquivalentTo(new[] { "e", "e!", "export" }));
+        });
+    }
+
+    [Test]
+    public void Tab_completes_file_paths_for_e()
+    {
+        var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"vixel-test-{Guid.NewGuid()}");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(System.IO.Path.Combine(dir, "art.vixel"), "{}");
+        try
+        {
+            var s = NewSession();
+            var (completed, _) = s.CompleteCommand($"e {dir}/ar");
+            Assert.That(completed, Does.EndWith("art.vixel"));
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+}
