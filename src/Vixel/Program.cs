@@ -292,7 +292,9 @@ public sealed class EditorSession
     public string StatusLine =>
         CurrentMode == Mode.Command
             ? ":" + CommandBuffer.Insert(CommandCursor, "█")
-            : $" {ModeLabel} | {Name}{(Dirty ? "*" : "")} | {CursorX},{CursorY} | color {CurrentColorIndex}{(Erasing ? " (erase)" : "")}" +
+            // Snapshot is the single definition of unsaved changes (#53/A): the star appears only
+            // when content actually differs from disk, so undo-back-to-saved shows clean.
+            : $" {ModeLabel} | {Name}{(HasUnsavedChanges ? "*" : "")} | {CursorX},{CursorY} | color {CurrentColorIndex}{(Erasing ? " (erase)" : "")}" +
               $" | brush {BrushSize}{(CircleBrush ? "○" : "□")} | {(Message.Length > 0 ? Message : "q via :q")}";
     /// <summary>Test seam: extend the palette to include index, then select it.</summary>
     internal void SetPaletteForTest(int index)

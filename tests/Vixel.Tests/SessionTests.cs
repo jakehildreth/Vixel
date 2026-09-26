@@ -311,6 +311,26 @@ public class SessionTests
     }
 
     [Test]
+    public void Status_bar_hides_star_after_undo_back_to_saved_state()
+    {
+        // Regression for #53 (option A): snapshot is the single definition of unsaved.
+        // Draw → undo-all → content matches disk → no '*' in the status bar.
+        var s = NewSession();
+        s.Stamp();
+        Assert.That(s.StatusLine, Does.Contain("*"), "modified content shows the star");
+        s.Undo();
+        Assert.That(s.StatusLine, Does.Not.Contain("*"), "undo back to initial blank state hides the star");
+    }
+
+    [Test]
+    public void Status_bar_shows_star_when_content_differs_from_disk()
+    {
+        var s = NewSession();
+        s.Stamp();
+        Assert.That(s.StatusLine, Does.Contain("*"));
+    }
+
+    [Test]
     public void New_with_zero_dimensions_is_rejected()
     {
         // Regression for #40: :new 0x0 used to throw or create a degenerate canvas.
