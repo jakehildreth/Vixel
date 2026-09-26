@@ -120,9 +120,15 @@ app.AddTimeout(TimeSpan.FromMilliseconds(200), () =>
     return true;
 });
 
-app.Run(window);
-window.Dispose();
-app.Dispose();
+try
+{
+    app.Run(window);
+}
+finally
+{
+    window.Dispose();
+    app.Dispose();
+}
 
 // ---------------------------------------------------------------------------
 
@@ -131,6 +137,8 @@ public sealed class EditorSession
 {
     public enum Mode { Normal, Paint, Command, Line, Rect, Select, Paste, Help }
 
+    private DateTimeOffset? _created; // preserved across saves; null = new file
+    private string? _savedSnapshot; // content fingerprint at last save/load; null = never saved
     public Canvas Canvas;
     public Palette Palette = new();
     public string Name;
@@ -168,11 +176,13 @@ public sealed class EditorSession
     {
         if (path is not null && File.Exists(path))
         {
-            var (canvas, palette, name) = OpenFile(path);
+            var (canvas, palette, name, created) = OpenFile(path);
             Canvas = canvas;
             Palette = palette;
             Name = name;
+            _created = created;
             Path = path;
+            _savedSnapshot = ContentSnapshot();
         }
         else
         {
@@ -180,6 +190,7 @@ public sealed class EditorSession
             Path = path;
             Name = path is not null ? System.IO.Path.GetFileNameWithoutExtension(path) : "untitled";
             LoadDefaultPalette();
+            _savedSnapshot = ContentSnapshot(); // blank initial state: undoing all the way back matches, :q stays clean
         }
     }
 
@@ -195,7 +206,7 @@ public sealed class EditorSession
     public void ExitHelp() { CurrentMode = Mode.Normal; StatusChanged?.Invoke(); }
 
     /// <summary>Loads a file by extension: .vixel (JSON) or imported .ase/.aseprite/.px/.piskel.</summary>
-    public static (Canvas Canvas, Palette Palette, string Name) OpenFile(string path)
+    public static (Canvas Canvas, Palette Palette, string Name, DateTimeOffset? Created) OpenFile(string path)
     {
         var name = System.IO.Path.GetFileNameWithoutExtension(path);
         switch (System.IO.Path.GetExtension(path).ToLowerInvariant())
@@ -203,13 +214,13 @@ public sealed class EditorSession
             case ".ase":
             case ".aseprite":
                 var (aseCanvas, asePalette) = AseFormat.Import(File.ReadAllBytes(path));
-                return (aseCanvas, asePalette, name);
+                return (aseCanvas, asePalette, name, null);
             case ".px":
                 var (pxCanvas, pxPalette) = PxFormat.Import(File.ReadAllBytes(path));
-                return (pxCanvas, pxPalette, name);
+                return (pxCanvas, pxPalette, name, null);
             case ".piskel":
                 var (piskelCanvas, piskelPalette) = PiskelFormat.Import(File.ReadAllText(path));
-                return (piskelCanvas, piskelPalette, name);
+                return (piskelCanvas, piskelPalette, name, null);
             default:
                 return VixelFile.Load(File.ReadAllText(path));
         }
@@ -224,6 +235,38 @@ public sealed class EditorSession
             "#ff004d", "#ffa300", "#ffec27", "#00e436", "#29adff", "#83769c", "#ff77a8", "#ffccaa",
         ];
         foreach (var hex in pico8) Palette.AddColor(Rgb.FromHex(hex));
+    }
+
+    /// <summary>Content fingerprint: dimensions + pixel indices + palette. Compared at :q.</summary>
+    private string ContentSnapshot()
+    {
+        var sb = new StringBuilder();
+        sb.Append(Canvas.Width).Append('x').Append(Canvas.Height).Append(';');
+        for (var y = 0; y < Canvas.Height; y++)
+            for (var x = 0; x < Canvas.Width; x++)
+                sb.Append(Canvas[x, y]?.ToString() ?? "-").Append(',');
+        sb.Append('|');
+        foreach (var c in Palette.Colors) sb.Append(c.ToHex()).Append(',');
+        return sb.ToString();
+    }
+
+    /// <summary>True when current content differs from the last saved/loaded snapshot.</summary>
+    private bool HasUnsavedChanges => _savedSnapshot is null ? Dirty : ContentSnapshot() != _savedSnapshot;
+
+    /// <summary>Loads a file into the session: replaces canvas/palette, clears history, snapshots for :q.</summary>
+    private void OpenIntoSession(string openTarget)
+    {
+        try
+        {
+            var (canvas, palette, name, created) = OpenFile(openTarget);
+            Canvas = canvas; Palette = palette; Name = name; Path = openTarget; _created = created;
+            History.Clear(); // #25: undo of a change recorded against the previous canvas would corrupt this one
+            _savedSnapshot = ContentSnapshot();
+            Dirty = false;
+            CursorX = CursorY = 0;
+            Message = $"opened {openTarget}";
+        }
+        catch (Exception e) { Message = e.Message; }
     }
 
     public int? EffectiveColor => Erasing ? null : CurrentColorIndex;
@@ -322,8 +365,8 @@ public sealed class EditorSession
 
     public void CancelMode() { CurrentMode = Mode.Normal; Message = ""; }
 
-    public void Undo() { History.Undo(Canvas); Dirty = true; }
-    public void Redo() { History.Redo(Canvas); Dirty = true; }
+    public void Undo() { if (History.CanUndo) { History.Undo(Canvas); Dirty = true; } }
+    public void Redo() { if (History.CanRedo) { History.Redo(Canvas); Dirty = true; } }
 
     public void Move(int dx, int dy)
     {
@@ -394,8 +437,9 @@ public sealed class EditorSession
         {
             case "w":
                 var target = parts.Length > 1 ? ExpandPath(parts[1]) : Path ?? Name + ".vixel";
-                File.WriteAllText(target, VixelFile.Save(Canvas, Palette, Name));
+                File.WriteAllText(target, VixelFile.Save(Canvas, Palette, Name, _created));
                 Path = target;
+                _savedSnapshot = ContentSnapshot();
                 Dirty = false;
                 Message = $"wrote {target}";
                 return true;
@@ -415,7 +459,7 @@ public sealed class EditorSession
                 Message = "cleared";
                 return true;
             case "q":
-                if (Dirty && parts[0] == "q")
+                if (HasUnsavedChanges)
                 {
                     Message = "unsaved changes — :q! to discard";
                     return true;
@@ -430,16 +474,13 @@ public sealed class EditorSession
                 quit = true;
                 return true;
             case "e" when parts.Length > 1:
-                try
+            case "e!" when parts.Length > 1:
+                if (parts[0] == "e" && HasUnsavedChanges)
                 {
-                    var openTarget = ExpandPath(parts[1]);
-                    var (canvas, palette, name) = OpenFile(openTarget);
-                    Canvas = canvas; Palette = palette; Name = name; Path = openTarget;
-                    Dirty = false;
-                    CursorX = CursorY = 0;
-                    Message = $"opened {openTarget}";
+                    Message = "unsaved changes — :e! to discard";
+                    return true;
                 }
-                catch (Exception e) { Message = e.Message; }
+                OpenIntoSession(ExpandPath(parts[1]));
                 return true;
             case "color" when parts.Length > 1:
                 try
@@ -457,9 +498,19 @@ public sealed class EditorSession
                 Message = $"exported {exportTarget} ×{scale}";
                 return true;
             case "new":
+            case "new!":
+                if (parts[0] == "new" && HasUnsavedChanges)
+                {
+                    Message = "unsaved changes — :new! to discard";
+                    return true;
+                }
                 var w = parts.Length > 1 && int.TryParse(parts[1].Split('x')[0], out var nw) ? nw : 64;
                 var h = parts.Length > 1 && parts[1].Contains('x') && int.TryParse(parts[1].Split('x')[1], out var nh) ? nh : 32;
                 Canvas = new Canvas(Math.Min(w, 512), Math.Min(h, 512));
+                History.Clear(); // #25: undo of a change recorded against the previous canvas would corrupt this one
+                _created = null; // new file: fresh created timestamp on next save
+                Path = null; // unnamed until first :w
+                _savedSnapshot = ContentSnapshot(); // fresh blank state: undo-all-the-way stays clean at :q
                 Dirty = false;
                 Message = $"new canvas {Canvas.Width}x{Canvas.Height}";
                 return true;

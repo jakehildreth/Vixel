@@ -73,6 +73,15 @@ public class CanvasTests
     }
 
     [Test]
+    public void SetPixel_out_of_bounds_names_the_offending_parameter()
+    {
+        // Regression for #31: y out of range used to throw naming x.
+        var canvas = new Canvas(8, 4);
+        Assert.That(Assert.Throws<ArgumentOutOfRangeException>(() => canvas.SetPixel(0, 4, 1))!.ParamName, Is.EqualTo("y"));
+        Assert.That(Assert.Throws<ArgumentOutOfRangeException>(() => canvas.SetPixel(8, 0, 1))!.ParamName, Is.EqualTo("x"));
+    }
+
+    [Test]
     public void Indexer_out_of_bounds_get_returns_null_not_throw()
     {
         // Reads off-canvas are legal (fill bounds checks, viewport clamping);

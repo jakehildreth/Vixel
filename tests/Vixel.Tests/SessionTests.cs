@@ -272,6 +272,139 @@ public class SessionTests
     }
 
     [Test]
+    public void Undo_on_empty_history_leaves_Dirty_false()
+    {
+        // Regression for #27: Undo/Redo set Dirty = true unconditionally.
+        var s = NewSession();
+        Assert.That(s.Dirty, Is.False);
+        s.Undo();
+        Assert.That(s.Dirty, Is.False, "no-op undo must not dirty the session");
+    }
+
+    [Test]
+    public void Redo_on_empty_history_leaves_Dirty_false()
+    {
+        var s = NewSession();
+        s.Redo();
+        Assert.That(s.Dirty, Is.False, "no-op redo must not dirty the session");
+    }
+
+    [Test]
+    public void Quit_after_undo_back_to_saved_state_quits_without_nag()
+    {
+        // Regression for #27: undo back to exactly the saved content must not nag.
+        var temp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"vixel-test-{Guid.NewGuid()}.vixel");
+        try
+        {
+            var s = NewSession();
+            s.ExecuteCommand($"w {temp}", out _); // save empty canvas
+            s.Stamp();                            // draw → dirty
+            s.Undo();                             // back to saved content, flag still set
+            Assert.That(s.Dirty, Is.True, "flag-based check would nag");
+
+            s.ExecuteCommand("q", out var quit);
+            Assert.That(quit, Is.True, "content matches saved state: quit without nag");
+        }
+        finally { File.Delete(temp); }
+    }
+
+    [Test]
+    public void Quit_with_real_unsaved_changes_still_nags()
+    {
+        var temp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"vixel-test-{Guid.NewGuid()}.vixel");
+        try
+        {
+            var s = NewSession();
+            s.ExecuteCommand($"w {temp}", out _);
+            s.Stamp(); // real change vs saved state
+
+            s.ExecuteCommand("q", out var quit);
+            Assert.Multiple(() =>
+            {
+                Assert.That(quit, Is.False, "content differs: :q must refuse");
+                Assert.That(s.Message, Does.Contain("unsaved"));
+            });
+        }
+        finally { File.Delete(temp); }
+    }
+
+    [Test]
+    public void Quit_after_undo_all_the_way_on_never_saved_session_does_not_nag()
+    {
+        // Reported live: blank start, draw, undo everything — :q must not nag.
+        var s = NewSession(); // never saved
+        s.Stamp();
+        s.Stamp();
+        s.Undo();
+        s.Undo();
+        s.ExecuteCommand("q", out var quit);
+        Assert.That(quit, Is.True, "content back to initial blank state: quit clean");
+    }
+
+    [Test]
+    public void Edit_command_with_unsaved_changes_warns_and_does_not_open()
+    {
+        // Reported live: :e discarded unsaved work without warning.
+        var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"vixel-test-{Guid.NewGuid()}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var pathB = System.IO.Path.Combine(dir, "b.vixel");
+            File.WriteAllText(pathB, VixelFile.Save(new Canvas(4, 4), new Palette(), "b"));
+
+            var s = NewSession();
+            s.Stamp(); // unsaved change
+            s.ExecuteCommand($"e {pathB}", out _);
+            Assert.Multiple(() =>
+            {
+                Assert.That(s.Message, Does.Contain("unsaved"), "warns before discarding");
+                Assert.That(s.Canvas.Width, Is.EqualTo(64), "still on the original canvas");
+            });
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Test]
+    public void Edit_force_discards_unsaved_changes_and_opens()
+    {
+        var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"vixel-test-{Guid.NewGuid()}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var pathB = System.IO.Path.Combine(dir, "b.vixel");
+            File.WriteAllText(pathB, VixelFile.Save(new Canvas(4, 4), new Palette(), "b"));
+
+            var s = NewSession();
+            s.Stamp();
+            s.ExecuteCommand($"e! {pathB}", out _);
+            Assert.That(s.Canvas.Width, Is.EqualTo(4), "e! forced the open");
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Test]
+    public void New_with_unsaved_changes_warns_and_keeps_canvas()
+    {
+        var s = NewSession();
+        s.Stamp();
+        s.ExecuteCommand("new 8x8", out _);
+        Assert.Multiple(() =>
+        {
+            Assert.That(s.Message, Does.Contain("unsaved"), "warns before discarding");
+            Assert.That(s.Canvas.Width, Is.EqualTo(64), "canvas not replaced");
+        });
+    }
+
+    [Test]
+    public void New_force_discards_unsaved_changes()
+    {
+        var s = NewSession();
+        s.Stamp();
+        s.ExecuteCommand("new! 8x8", out _);
+        Assert.That(s.Canvas.Width, Is.EqualTo(8), "new! forced the replace");
+    }
+
+    [Test]
     public void Command_color_adds_custom_color()
     {
         var s = NewSession();
@@ -295,7 +428,7 @@ public class SessionTests
         File.WriteAllBytes(temp, AseFormat.Export(source, palette));
         try
         {
-            var (canvas, loadedPalette, name) = EditorSession.OpenFile(temp);
+            var (canvas, loadedPalette, name, _) = EditorSession.OpenFile(temp);
             Assert.Multiple(() =>
             {
                 Assert.That(canvas[1, 1], Is.Not.Null);
@@ -318,7 +451,7 @@ public class SessionTests
         File.WriteAllBytes(temp, PxFormat.Export(source, palette));
         try
         {
-            var (canvas, _, _) = EditorSession.OpenFile(temp);
+            var (canvas, _, _, _) = EditorSession.OpenFile(temp);
             Assert.That(canvas[2, 0], Is.Not.Null);
         }
         finally { File.Delete(temp); }
@@ -336,7 +469,7 @@ public class SessionTests
         File.WriteAllText(temp, PiskelFormat.Export(source, palette));
         try
         {
-            var (canvas, _, _) = EditorSession.OpenFile(temp);
+            var (canvas, _, _, _) = EditorSession.OpenFile(temp);
             Assert.That(canvas[0, 0], Is.Not.Null);
         }
         finally { File.Delete(temp); }
@@ -353,7 +486,7 @@ public class SessionTests
         File.WriteAllText(temp, VixelFile.Save(canvas, palette, "roundtrip"));
         try
         {
-            var (loaded, _, name) = EditorSession.OpenFile(temp);
+            var (loaded, _, name, _) = EditorSession.OpenFile(temp);
             Assert.Multiple(() =>
             {
                 Assert.That(loaded[0, 0], Is.Not.Null);
@@ -374,7 +507,7 @@ public class SessionTests
         File.WriteAllBytes(temp, PxFormat.Export(source, palette));
         try
         {
-            var (canvas, _, _) = EditorSession.OpenFile(temp);
+            var (canvas, _, _, _) = EditorSession.OpenFile(temp);
             Assert.That(canvas[0, 0], Is.Not.Null);
         }
         finally { File.Delete(temp); }
@@ -390,7 +523,7 @@ public class SessionTests
         File.WriteAllBytes(fixture, Convert.FromBase64String(RealPx));
         try
         {
-            var (canvas, palette, _) = EditorSession.OpenFile(fixture);
+            var (canvas, palette, _, _) = EditorSession.OpenFile(fixture);
             var painted = 0;
             for (var y = 0; y < canvas.Height; y++)
                 for (var x = 0; x < canvas.Width; x++)
@@ -404,6 +537,63 @@ public class SessionTests
             });
         }
         finally { File.Delete(fixture); }
+    }
+
+    [Test]
+    public void Edit_command_after_drawing_does_not_let_undo_corrupt_the_new_canvas()
+    {
+        // Regression for #25: :e and :new kept the old UndoStack, so the next undo
+        // applies the previous file's PixelChange to the fresh canvas (resize + pixel stomp).
+        var dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"vixel-test-{Guid.NewGuid()}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            // B is a different size from A's canvas and has content where A's stroke landed.
+            var pathB = System.IO.Path.Combine(dir, "b.vixel");
+            var b = new EditorSession(path: null);
+            b.ExecuteCommand("new 16x8", out _);
+            b.Canvas.SetPixel(0, 0, 7); // content exactly where A will draw
+            File.WriteAllText(pathB, VixelFile.Save(b.Canvas, b.Palette, "b"));
+
+            var a = new EditorSession(path: null); // 64x32
+            a.CursorX = 0; a.CursorY = 0;
+            a.Stamp(); // A's history: change recorded against a 64x32 canvas, touched (0,0)
+
+            Assert.That(a.ExecuteCommand($"e! {pathB}", out _), Is.True); // a has unsaved changes; force the open
+            Assert.Multiple(() =>
+            {
+                Assert.That(a.Canvas.Width, Is.EqualTo(16), "B loaded");
+                Assert.That(a.Canvas[0, 0], Is.EqualTo(7), "B's content present");
+            });
+
+            a.Undo(); // must be a no-op on B, not A's change replayed onto B
+            Assert.Multiple(() =>
+            {
+                Assert.That(a.Canvas.Width, Is.EqualTo(16), "undo must not resize B to A's geometry");
+                Assert.That(a.Canvas.Height, Is.EqualTo(8), "undo must not resize B to A's geometry");
+                Assert.That(a.Canvas[0, 0], Is.EqualTo(7), "undo must not stomp B's pixels with A's old value");
+            });
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Test]
+    public void New_command_after_drawing_does_not_let_undo_corrupt_the_fresh_canvas()
+    {
+        var a = new EditorSession(path: null); // 64x32
+        a.CursorX = 0; a.CursorY = 0;
+        a.Stamp(); // A's history: touched (0,0) on a 64x32 canvas
+
+        Assert.That(a.ExecuteCommand("new! 8x8", out _), Is.True); // a has unsaved changes; force the replace
+        Assert.That(a.Canvas[0, 0], Is.Null, "fresh canvas is empty");
+
+        a.Undo(); // must be a no-op, not A's stroke replayed + resized onto the new canvas
+        Assert.Multiple(() =>
+        {
+            Assert.That(a.Canvas.Width, Is.EqualTo(8), "undo must not resize the new canvas");
+            Assert.That(a.Canvas.Height, Is.EqualTo(8), "undo must not resize the new canvas");
+            Assert.That(a.Canvas[0, 0], Is.Null, "undo must not stomp the new canvas");
+        });
     }
 
     private const string RealPx =

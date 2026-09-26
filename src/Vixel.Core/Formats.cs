@@ -11,8 +11,9 @@ public static class VixelFile
 {
     public const int CurrentVersion = 1;
 
-    public static string Save(Canvas canvas, Palette palette, string name)
+    public static string Save(Canvas canvas, Palette palette, string name, DateTimeOffset? created = null)
     {
+        var now = DateTimeOffset.UtcNow;
         var doc = new JsonObject
         {
             ["version"] = CurrentVersion,
@@ -23,8 +24,8 @@ public static class VixelFile
             ["rows"] = BuildRows(canvas),
             ["meta"] = new JsonObject
             {
-                ["created"] = DateTimeOffset.UtcNow.ToString("o"),
-                ["modified"] = DateTimeOffset.UtcNow.ToString("o"),
+                ["created"] = (created ?? now).ToString("o"),
+                ["modified"] = now.ToString("o"),
             },
         };
         return doc.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
@@ -43,7 +44,7 @@ public static class VixelFile
         return rows;
     }
 
-    public static (Canvas Canvas, Palette Palette, string Name) Load(string json)
+    public static (Canvas Canvas, Palette Palette, string Name, DateTimeOffset? Created) Load(string json)
     {
         JsonObject doc;
         try
@@ -64,6 +65,7 @@ public static class VixelFile
         var width = doc["width"]?.GetValue<int>() ?? throw new InvalidDataException("missing width");
         var height = doc["height"]?.GetValue<int>() ?? throw new InvalidDataException("missing height");
         var name = doc["name"]?.GetValue<string>() ?? "untitled";
+        var created = DateTimeOffset.TryParse(doc["meta"]?["created"]?.GetValue<string>(), out var c) ? c : (DateTimeOffset?)null;
 
         var palette = new Palette();
         foreach (var hex in doc["palette"]?.AsArray() ?? [])
@@ -81,10 +83,14 @@ public static class VixelFile
                 throw new InvalidDataException($"row {y} count {row.Count} != width {width}");
             for (var x = 0; x < width; x++)
                 if (row[x] is JsonValue v && v.TryGetValue<int>(out var index))
+                {
+                    if (index < 0 || index >= palette.Colors.Count)
+                        throw new InvalidDataException($"pixel ({x},{y}) references palette index {index}, palette has {palette.Colors.Count} colors");
                     canvas.SetPixel(x, y, index);
+                }
         }
 
-        return (canvas, palette, name);
+        return (canvas, palette, name, created);
     }
 }
 
@@ -163,32 +169,68 @@ public static class PiskelFormat
 
     public static (Canvas Canvas, Palette Palette) Import(string json)
     {
-        var doc = JsonNode.Parse(json)!.AsObject();
-        var piskel = doc["piskel"]!.AsObject();
-        var width = piskel["width"]!.GetValue<int>();
-        var height = piskel["height"]!.GetValue<int>();
-        var frames = piskel["frames"]!.AsArray();
+        JsonObject doc;
+        try
+        {
+            doc = JsonNode.Parse(json) as JsonObject
+                ?? throw new InvalidDataException("piskel root must be a JSON object");
+        }
+        catch (JsonException e)
+        {
+            throw new InvalidDataException("not valid JSON", e);
+        }
+
+        var piskel = doc["piskel"] as JsonObject
+            ?? throw new InvalidDataException("missing \"piskel\" object");
+        var width = piskel["width"]?.GetValue<int>()
+            ?? throw new InvalidDataException("missing piskel width");
+        var height = piskel["height"]?.GetValue<int>()
+            ?? throw new InvalidDataException("missing piskel height");
+        var frames = piskel["frames"] as JsonArray
+            ?? throw new InvalidDataException("missing piskel frames");
         if (frames.Count == 0) throw new InvalidDataException("piskel file has no frames");
 
-        var dataUri = frames[0]!["dataUri"]!.GetValue<string>();
-        var png = Convert.FromBase64String(dataUri[(dataUri.IndexOf(',') + 1)..]);
-
-        using var image = Image.Load<Rgba32>(png);
-        if (image.Width != width || image.Height != height)
-            throw new InvalidDataException("frame dimensions do not match header");
-
-        var canvas = new Canvas(width, height);
-        var palette = new Palette();
-        for (var y = 0; y < height; y++)
+        var dataUri = (frames[0] as JsonObject)?["dataUri"]?.GetValue<string>()
+            ?? throw new InvalidDataException("first piskel frame has no dataUri");
+        var comma = dataUri.IndexOf(',');
+        if (comma < 0) throw new InvalidDataException("piskel dataUri is not a data URI");
+        byte[] png;
+        try
         {
-            for (var x = 0; x < width; x++)
-            {
-                var p = image[x, y];
-                if (p.A == 0) continue;
-                canvas.SetPixel(x, y, palette.AddColor(new Rgb(p.R, p.G, p.B)));
-            }
+            png = Convert.FromBase64String(dataUri[(comma + 1)..]);
         }
-        return (canvas, palette);
+        catch (FormatException e)
+        {
+            throw new InvalidDataException("piskel frame data is not valid base64", e);
+        }
+
+        Image<Rgba32> image;
+        try
+        {
+            image = Image.Load<Rgba32>(png);
+        }
+        catch (Exception e) when (e is UnknownImageFormatException or InvalidImageContentException)
+        {
+            throw new InvalidDataException("piskel frame data is not a decodable image", e);
+        }
+        using (image)
+        {
+            if (image.Width != width || image.Height != height)
+                throw new InvalidDataException("frame dimensions do not match header");
+
+            var canvas = new Canvas(width, height);
+            var palette = new Palette();
+            for (var y = 0; y < height; y++)
+            {
+                for (var x = 0; x < width; x++)
+                {
+                    var p = image[x, y];
+                    if (p.A == 0) continue;
+                    canvas.SetPixel(x, y, palette.AddColor(new Rgb(p.R, p.G, p.B)));
+                }
+            }
+            return (canvas, palette);
+        }
     }
 }
 
@@ -356,7 +398,7 @@ public static class PxFormat
         var fileSize = ReadU64(data, ref pos);
         if (fileSize > (ulong)data.Length + 64)
             throw new InvalidDataException("not a px file");
-        var artworkIdLength = data[pos++];
+        var artworkIdLength = ReadByte(data, ref pos);
         pos = ArtworkHeaderSize; // remainder of header unused
         pos += artworkIdLength;  // artwork id
 
@@ -371,10 +413,12 @@ public static class PxFormat
         {
             var start = pos;
             var size = (int)ReadU32(data, ref pos); // content length only (header excluded)
-            var type = data[pos++];
+            var type = ReadByte(data, ref pos);
             // id length+id sit at the padded 16-byte header end in real files
+            RequireBytes(data, start + EntryHeaderSize, 1);
             var idLength = data[start + EntryHeaderSize];
             var idPos = start + EntryHeaderSize + 1;
+            RequireBytes(data, idPos, idLength);
             entryIds.Add((System.Text.Encoding.ASCII.GetString(data, idPos, idLength), type));
             pos = start + EntryHeaderSize + size;
         }
@@ -389,8 +433,8 @@ public static class PxFormat
         {
             var start = pos;
             var size = (int)ReadU32(data, ref pos);
-            var idLength = data[pos++];
-            var nameLength = data[pos++];
+            var idLength = ReadByte(data, ref pos);
+            var nameLength = ReadByte(data, ref pos);
             pos = start + ModelHeaderSize;
             var id = ReadAscii(data, ref pos, idLength);
             pos += nameLength;
@@ -400,8 +444,8 @@ public static class PxFormat
             {
                 var frameStart = pos;
                 var frameSize = (int)ReadU32(data, ref pos); // content length only (header excluded)
-                var frameIdLength = data[pos++];
-                var contentIdLength = data[pos++];
+                var frameIdLength = ReadByte(data, ref pos);
+                var contentIdLength = ReadByte(data, ref pos);
                 pos = frameStart + ModelHeaderSize;
                 pos += frameIdLength + 4 + 1; // id, duration, selected
                 var contentId = ReadAscii(data, ref pos, contentIdLength);
@@ -411,6 +455,7 @@ public static class PxFormat
             // Layer `size` is content length (header excluded); tail is inside it:
             // opacity f16, visible, locked, selected, alphaLocked, blendMode u16, linked,
             // [crop] u64, [clip] u64, color 4B, [fx] u64.
+            RequireBytes(data, pos + 2, 1);
             var visible = data[pos + 2] != 0;
             layerPixels[id] = (firstContentId ?? "", visible);
             pos = start + ModelHeaderSize + size;
@@ -424,12 +469,13 @@ public static class PxFormat
         {
             var start = pos;
             ReadU64(data, ref pos); // size: unreliable (undercounts stream); clen is authoritative
-            var idLength = data[pos++];
+            var idLength = ReadByte(data, ref pos);
             var uncompressedLength = (int)ReadU32(data, ref pos);
             var compressedLength = (int)ReadU32(data, ref pos);
             // Header fields occupy 18 bytes, zero-padded to 32. Data follows the id.
             pos = start + ModelHeaderSize;
             var id = ReadAscii(data, ref pos, idLength);
+            RequireBytes(data, pos, compressedLength);
             var compressed = data.AsSpan(pos, compressedLength).ToArray();
             pos += compressedLength; // clean files: palette follows immediately; Pixquare: anchor below tolerates the 7-byte trailer
             contents[id] = ZlibDecompressLenient(compressed, uncompressedLength);
@@ -440,6 +486,7 @@ public static class PxFormat
         var paletteCount = 0UL;
         for (var skip = 0; skip <= 8 && paletteCount == 0; skip++)
         {
+            if (pos + skip + 8 > data.Length) break;
             var candidate = BitConverter.ToUInt64(data, pos + skip);
             if (candidate is > 0 and <= 4096 && pos + skip + 8 + (int)candidate * 4 <= data.Length)
             {
@@ -448,8 +495,12 @@ public static class PxFormat
             }
         }
         if (paletteCount == 0)
+        {
+            RequireBytes(data, pos, Math.Min(16, data.Length - pos));
             throw new InvalidDataException($"px palette not found after frame contents (pos={pos}, next={Convert.ToHexString(data.AsSpan(pos, Math.Min(16, data.Length - pos)))})");
+        }
         pos += 8;
+        RequireBytes(data, pos, (int)paletteCount * 4);
         var paletteEntries = new (byte R, byte G, byte B, byte A)[paletteCount];
         for (var i = 0; i < paletteEntries.Length; i++)
         {
@@ -509,9 +560,21 @@ public static class PxFormat
     private static byte Unpremultiply(byte channel, byte alpha) =>
         alpha == 0 ? (byte)0 : (byte)Math.Min(255, channel * 255 / alpha);
 
-    private static uint ReadU32(byte[] d, ref int p) { var v = BitConverter.ToUInt32(d, p); p += 4; return v; }
-    private static ulong ReadU64(byte[] d, ref int p) { var v = BitConverter.ToUInt64(d, p); p += 8; return v; }
-    private static string ReadAscii(byte[] d, ref int p, int length) { var s = System.Text.Encoding.ASCII.GetString(d, p, length); p += length; return s; }
+    private static void RequireBytes(byte[] d, int p, int count)
+    {
+        if (p < 0 || count < 0 || p + count > d.Length)
+            throw new InvalidDataException($"truncated px file: need {count} bytes at {p}, have {d.Length}");
+    }
+
+    private static byte ReadByte(byte[] d, ref int p)
+    {
+        RequireBytes(d, p, 1);
+        return d[p++];
+    }
+
+    private static uint ReadU32(byte[] d, ref int p) { RequireBytes(d, p, 4); var v = BitConverter.ToUInt32(d, p); p += 4; return v; }
+    private static ulong ReadU64(byte[] d, ref int p) { RequireBytes(d, p, 8); var v = BitConverter.ToUInt64(d, p); p += 8; return v; }
+    private static string ReadAscii(byte[] d, ref int p, int length) { RequireBytes(d, p, length); var s = System.Text.Encoding.ASCII.GetString(d, p, length); p += length; return s; }
 
     private static void SkipModels(byte[] d, ref int pos, ulong count)
     {
