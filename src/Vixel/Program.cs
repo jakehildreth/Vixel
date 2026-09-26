@@ -120,9 +120,15 @@ app.AddTimeout(TimeSpan.FromMilliseconds(200), () =>
     return true;
 });
 
-app.Run(window);
-window.Dispose();
-app.Dispose();
+try
+{
+    app.Run(window);
+}
+finally
+{
+    window.Dispose();
+    app.Dispose();
+}
 
 // ---------------------------------------------------------------------------
 
