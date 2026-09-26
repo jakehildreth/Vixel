@@ -122,13 +122,13 @@ public static class PngFormat
     }
 
     // Test helpers — verify output without depending on our own writer's internals.
-    public static (int W, int H) ReadDimensions(byte[] png)
+    internal static (int W, int H) ReadDimensions(byte[] png)
     {
         using var image = Image.Load(png);
         return (image.Width, image.Height);
     }
 
-    public static (int R, int G, int B, int A) ReadPixel(byte[] png, int x, int y)
+    internal static (int R, int G, int B, int A) ReadPixel(byte[] png, int x, int y)
     {
         using var image = Image.Load<Rgba32>(png);
         var p = image[x, y];

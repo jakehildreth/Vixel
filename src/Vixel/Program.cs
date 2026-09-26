@@ -293,7 +293,7 @@ public sealed class EditorSession
             : $" {ModeLabel} | {Name}{(Dirty ? "*" : "")} | {CursorX},{CursorY} | color {CurrentColorIndex}{(Erasing ? " (erase)" : "")}" +
               $" | brush {BrushSize}{(CircleBrush ? "○" : "□")} | {(Message.Length > 0 ? Message : "q via :q")}";
     /// <summary>Test seam: extend the palette to include index, then select it.</summary>
-    public void SetPaletteForTest(int index)
+    internal void SetPaletteForTest(int index)
     {
         while (Palette.Colors.Count <= index)
             Palette.AddColor(new Rgb((byte)Palette.Colors.Count, 0, 0));
