@@ -91,27 +91,22 @@ else
 }
 session.StatusChanged();
 
-// Help overlay: shown on :help or F1; any key closes.
+// Help is a session mode: HelpView renders over the canvas; CanvasView routes keys to it.
 HelpView? help = null;
-app.AddTimeout(TimeSpan.FromMilliseconds(100), () =>
+void SyncHelpView()
 {
-    if (session.HelpRequested)
+    if (session.CurrentMode == EditorSession.Mode.Help && help is null)
     {
-        session.HelpRequested = false;
-        if (help is null)
-        {
-            help = new HelpView(close: () =>
-            {
-                window.Remove(help);
-                help = null;
-                canvasView.SetFocus();
-            });
-            window.Add(help);
-            help.SetFocus();
-        }
+        help = new HelpView(session);
+        window.Add(help);
     }
-    return true;
-});
+    else if (session.CurrentMode != EditorSession.Mode.Help && help is not null)
+    {
+        window.Remove(help);
+        help = null;
+    }
+}
+session.StatusChanged += SyncHelpView;
 
 // Cursor blink ticks always; marching ants only while an overlay is animated.
 app.AddTimeout(TimeSpan.FromMilliseconds(200), () =>
@@ -134,7 +129,7 @@ app.Dispose();
 /// <summary>Editing state: modes, current color/tool, overlay, history. Framework-free.</summary>
 public sealed class EditorSession
 {
-    public enum Mode { Normal, Paint, Command, Line, Rect, Select, Paste }
+    public enum Mode { Normal, Paint, Command, Line, Rect, Select, Paste, Help }
 
     public Canvas Canvas;
     public Palette Palette = new();
@@ -166,8 +161,8 @@ public sealed class EditorSession
 
     public Action? StatusChanged;
 
-    /// <summary>Set by :help; the TUI shows the help view and clears it.</summary>
-    public bool HelpRequested;
+    /// <summary>Help scroll offset (Mode.Help only).</summary>
+    public int HelpScroll;
 
     public EditorSession(string? path)
     {
@@ -187,6 +182,17 @@ public sealed class EditorSession
             LoadDefaultPalette();
         }
     }
+
+    /// <summary>Opens on-line help.</summary>
+    public void EnterHelp() { CurrentMode = Mode.Help; HelpScroll = 0; StatusChanged?.Invoke(); }
+
+    public void ScrollHelp(int delta)
+    {
+        HelpScroll = Math.Max(0, HelpScroll + delta); // max bound is viewport-dependent; the view clamps
+        StatusChanged?.Invoke();
+    }
+
+    public void ExitHelp() { CurrentMode = Mode.Normal; StatusChanged?.Invoke(); }
 
     /// <summary>Loads a file by extension: .vixel (JSON) or imported .ase/.aseprite/.px/.piskel.</summary>
     public static (Canvas Canvas, Palette Palette, string Name) OpenFile(string path)
@@ -397,7 +403,7 @@ public sealed class EditorSession
                 Message = StarViaGitHubCli() ?? OpenInBrowser("https://github.com/jakehildreth/vixel");
                 return true;
             case "help":
-                HelpRequested = true;
+                EnterHelp();
                 Message = "help";
                 return true;
             case "clear":
@@ -493,7 +499,7 @@ public sealed class CanvasView : View
                 _s.ExecuteCommand(_s.CommandBuffer, out var quit);
                 _s.CommandBuffer = "";
                 _s.CommandCursor = 0;
-                _s.CurrentMode = EditorSession.Mode.Normal;
+                if (_s.CurrentMode == EditorSession.Mode.Command) _s.CurrentMode = EditorSession.Mode.Normal; // commands may switch modes (e.g. :help)
                 if (quit) App?.RequestStop();
             }
             else if (key == Key.Esc)
@@ -531,6 +537,17 @@ public sealed class CanvasView : View
             return true;
         }
 
+        if (_s.CurrentMode == EditorSession.Mode.Help)
+        {
+            if (key == Key.J || key == Key.CursorDown) _s.ScrollHelp(1);
+            else if (key == Key.K || key == Key.CursorUp) _s.ScrollHelp(-1);
+            else if (key == Key.G) _s.ScrollHelp(int.MinValue);            // g: top
+            else if (key == Key.G.WithShift) _s.ScrollHelp(int.MaxValue);  // G: bottom
+            else _s.ExitHelp();
+            SetNeedsDraw();
+            return true;
+        }
+
         var handled = true;
         if (key == Key.CursorLeft || key == Key.H) _s.Move(-1, 0);
         else if (key == Key.CursorRight || key == Key.L) _s.Move(1, 0);
@@ -562,7 +579,7 @@ public sealed class CanvasView : View
         else if (key.TryGetPrintableRune(out var plus) && plus.Value is '=' or '+') { _s.BrushSize = Math.Min(9, _s.BrushSize + 1); }
         else if (key == Key.Tab) { _s.PalettePage++; }
         else if (key == Key.Tab.WithShift) { _s.PalettePage = Math.Max(0, _s.PalettePage - 1); }
-        else if (key == Key.F1) { _s.HelpRequested = true; }
+        else if (key == Key.F1) { _s.EnterHelp(); }
         else handled = false;
 
         SetNeedsDraw();
@@ -946,36 +963,28 @@ public sealed class HelpView : View
         "Esc                exit PAINT / cancel / close this help",
     ];
 
-    private readonly Action _close;
-    private int _scroll;
+    /// <summary>Max scroll given a viewport height (tested; the session clamps against this).</summary>
+    public static int MaxScroll(int viewportHeight) => Math.Max(0, Lines.Length - viewportHeight);
 
-    public HelpView(Action close)
+    private readonly EditorSession _s;
+
+    public HelpView(EditorSession session)
     {
-        _close = close;
+        _s = session;
         Width = Dim.Fill();
         Height = Dim.Fill();
-        CanFocus = true;
-    }
-
-    protected override bool OnKeyDown(Key key)
-    {
-        if (key == Key.J || key == Key.CursorDown)
-            _scroll = Math.Min(Math.Max(0, Lines.Length - Viewport.Height), _scroll + 1);
-        else if (key == Key.K || key == Key.CursorUp)
-            _scroll = Math.Max(0, _scroll - 1);
-        else
-            _close();
-        return true;
+        CanFocus = false; // keys are routed by CanvasView via Mode.Help
     }
 
     protected override bool OnDrawingContent(DrawContext? context)
     {
         SetAttribute(new Attribute(Color.None, Color.None));
+        var scroll = Math.Min(_s.HelpScroll, MaxScroll(Viewport.Height));
         var maxWidth = Lines.Max(l => l.Length);
         var originX = Math.Max(0, (Viewport.Width - maxWidth) / 2);
         for (var row = 0; row < Viewport.Height; row++)
         {
-            var lineIndex = _scroll + row;
+            var lineIndex = scroll + row;
             if (lineIndex >= Lines.Length) break;
             Move(originX, row);
             AddStr(Lines[lineIndex]);
