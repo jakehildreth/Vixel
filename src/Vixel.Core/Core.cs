@@ -305,14 +305,31 @@ public static class AtomicWrite
     public static void WriteAllText(string path, string contents)
     {
         var tmp = path + ".tmp";
-        File.WriteAllText(tmp, contents);
-        File.Move(tmp, path, overwrite: true);
+        try
+        {
+            File.WriteAllText(tmp, contents);
+            File.Move(tmp, path, overwrite: true);
+        }
+        catch
+        {
+            // Best-effort cleanup: never leave a .tmp sibling on write/move failure (#55).
+            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* cleanup must not mask the real error */ }
+            throw;
+        }
     }
 
     public static void WriteAllBytes(string path, byte[] contents)
     {
         var tmp = path + ".tmp";
-        File.WriteAllBytes(tmp, contents);
-        File.Move(tmp, path, overwrite: true);
+        try
+        {
+            File.WriteAllBytes(tmp, contents);
+            File.Move(tmp, path, overwrite: true);
+        }
+        catch
+        {
+            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+            throw;
+        }
     }
 }
