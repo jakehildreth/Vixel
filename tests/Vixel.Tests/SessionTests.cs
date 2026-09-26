@@ -282,6 +282,54 @@ public class SessionTests
     }
 
     [Test]
+    public void New_with_zero_dimensions_is_rejected()
+    {
+        // Regression for #40: :new 0x0 used to throw or create a degenerate canvas.
+        var s = NewSession();
+        s.ExecuteCommand("new! 0x0", out _);
+        Assert.That(s.Canvas.Width, Is.GreaterThanOrEqualTo(1), "falls back to default, no crash");
+    }
+
+    [Test]
+    public void New_with_garbage_dimensions_falls_back_to_default()
+    {
+        var s = NewSession();
+        s.ExecuteCommand("new! abc", out _);
+        Assert.Multiple(() =>
+        {
+            Assert.That(s.Canvas.Width, Is.EqualTo(64), "garbage → default 64");
+            Assert.That(s.Canvas.Height, Is.EqualTo(32), "garbage → default 32");
+        });
+    }
+
+    [Test]
+    public void Resize_with_garbage_dimensions_shows_usage_and_does_not_change_canvas()
+    {
+        var s = NewSession();
+        var before = s.Canvas.Width;
+        s.ExecuteCommand("resize abc", out _);
+        Assert.Multiple(() =>
+        {
+            Assert.That(s.Message, Does.Contain("usage"), "malformed → usage message");
+            Assert.That(s.Canvas.Width, Is.EqualTo(before), "canvas unchanged");
+        });
+    }
+
+    [Test]
+    public void Resize_with_valid_dimensions_applies_and_is_undoable()
+    {
+        var s = NewSession();
+        s.ExecuteCommand("resize 16x8", out _);
+        Assert.Multiple(() =>
+        {
+            Assert.That(s.Canvas.Width, Is.EqualTo(16));
+            Assert.That(s.Canvas.Height, Is.EqualTo(8));
+        });
+        s.Undo();
+        Assert.That(s.Canvas.Width, Is.EqualTo(64), "resize undo restores prior size");
+    }
+
+    [Test]
     public void Redo_on_empty_history_leaves_Dirty_false()
     {
         var s = NewSession();

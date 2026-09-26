@@ -68,7 +68,12 @@ public sealed class Palette
 }
 
 /// <summary>A single undoable canvas mutation: size before/after plus every touched pixel.</summary>
-public sealed record PixelChange(int WidthBefore, int HeightBefore, IReadOnlyList<PixelTouch> Touched);
+public sealed record PixelChange(int WidthBefore, int HeightBefore, IReadOnlyList<PixelTouch> Touched, int WidthAfter = 0, int HeightAfter = 0)
+{
+    /// <summary>Effective size after the change (defaults to before-size for pixel-only changes).</summary>
+    public int ResultWidth => WidthAfter > 0 ? WidthAfter : WidthBefore;
+    public int ResultHeight => HeightAfter > 0 ? HeightAfter : HeightBefore;
+}
 
 /// <summary>One touched pixel: position and palette-index before/after (null = transparent).</summary>
 public readonly record struct PixelTouch(int X, int Y, int? Old, int? New);
@@ -123,7 +128,7 @@ public sealed class Canvas
     {
         if (newWidth < 1 || newHeight < 1) throw new ArgumentOutOfRangeException(nameof(newWidth));
         if (newWidth == Width && newHeight == Height)
-            return new PixelChange(Width, Height, []);
+            return new PixelChange(Width, Height, [], Width, Height);
 
         var touched = new List<PixelTouch>();
         var next = new int?[newWidth, newHeight];
@@ -142,7 +147,7 @@ public sealed class Canvas
             }
         }
 
-        var change = new PixelChange(Width, Height, touched);
+        var change = new PixelChange(Width, Height, touched, newWidth, newHeight);
         _pixels = next;
         Width = newWidth;
         Height = newHeight;
@@ -160,9 +165,11 @@ public sealed class Canvas
         }
     }
 
-    /// <summary>Re-applies a change (redo): pixels to new values.</summary>
+    /// <summary>Re-applies a change (redo/time-lapse): size first, then pixels to new values.</summary>
     public void ApplyForward(PixelChange change)
     {
+        if (change.ResultWidth != Width || change.ResultHeight != Height)
+            ForceResize(change.ResultWidth, change.ResultHeight);
         foreach (var t in change.Touched)
         {
             if (t.X < Width && t.Y < Height) _pixels[t.X, t.Y] = t.New;

@@ -244,4 +244,28 @@ public class UndoStackTests
             Assert.That(replay[6, 6], Is.Null, "second step not replayed");
         });
     }
+
+
+    [Test]
+    public void Replay_across_a_resize_keeps_pixels_on_the_resized_canvas()
+    {
+        // Regression for #40: ApplyForward ignored size, so a time-lapse spanning a resize
+        // replayed onto the wrong geometry.
+        var canvas = new Canvas(4, 4);
+        var history = new UndoStack();
+        history.Push(Tools.Stamp(canvas, 0, 0, 1, 1, false));   // draw at 4x4
+        history.Push(canvas.Resize(8, 8));                       // grow
+        history.Push(Tools.Stamp(canvas, 7, 7, 2, 1, false));   // draw at 8x8
+
+        var replay = new Canvas(4, 4);
+        history.ReplayOnto(replay, upToStep: 3);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(replay.Width, Is.EqualTo(8), "resize step must be replayed");
+            Assert.That(replay.Height, Is.EqualTo(8), "resize step must be replayed");
+            Assert.That(replay[0, 0], Is.EqualTo(1), "pre-resize pixel survives");
+            Assert.That(replay[7, 7], Is.EqualTo(2), "post-resize pixel lands");
+        });
+    }
 }
