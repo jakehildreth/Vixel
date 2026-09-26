@@ -753,14 +753,14 @@ public sealed class CanvasView : View
             Move(0, cellRow);
             for (var x = 0; x < canvas.Width; x++)
             {
-                var top = RenderColor(canvas[x, cellRow * 2]) ?? BackgroundShade(x, cellRow * 2);
+                var top = RenderColor(canvas[x, cellRow * 2]);
                 var bottom = cellRow * 2 + 1 < canvas.Height
-                    ? RenderColor(canvas[x, cellRow * 2 + 1]) ?? BackgroundShade(x, cellRow * 2 + 1)
+                    ? RenderColor(canvas[x, cellRow * 2 + 1])
                     : (Rgb?)null;
 
-                var (fg, bg) = CellColors(top, bottom);
-                SetAttribute(new Attribute(fg, bg));
-                AddRune(GlyphFor(top, bottom));
+                var cell = CellMapping.Map(top, bottom, x, cellRow * 2);
+                SetAttribute(new Attribute(ToTerminal(cell.Fg), ToTerminal(cell.Bg)));
+                AddRune(cell.Glyph);
             }
         }
 
@@ -769,34 +769,7 @@ public sealed class CanvasView : View
         return true;
     }
 
-    private (Color Fg, Color Bg) CellColors(Rgb? top, Rgb? bottom)
-    {
-        // ▀ draws the top half from fg; ▄ draws the bottom half from fg as well.
-        // fg always carries the drawn half's color: top when set, else bottom.
-        // bg carries the other half when both are set; otherwise black.
-        var fg = top.HasValue ? ToTerminal(top.Value) : (bottom.HasValue ? ToTerminal(bottom.Value) : Color.Black);
-        var bg = top.HasValue && bottom.HasValue ? ToTerminal(bottom.Value) : Color.Black;
-        return (fg, bg);
-    }
 
-    private static char GlyphFor(Rgb? top, Rgb? bottom) =>
-        (top.HasValue, bottom.HasValue) switch
-        {
-            (true, true) => '▀',
-            (true, false) => '▀',
-            (false, true) => '▄',
-            (false, false) => ' ',
-        };
-
-    /// <summary>The 2×2-pixel checkerboard shade for an empty pixel: 2 cells wide × 1 cell row per check.</summary>
-    private static Rgb BackgroundShade(int x, int y) =>
-        (x / 2 + y / 2) % 2 == 0 ? new Rgb(38, 38, 38) : new Rgb(22, 22, 22);
-    public static Rgb BackgroundShadeForTest(int x, int y) => BackgroundShade(x, y);
-
-
-    // Test seams: expose the cell-mapping decisions without a terminal.
-    public (Color Fg, Color Bg) CellColorsForTest(Rgb? top, Rgb? bottom) => CellColors(top, bottom);
-    public static char GlyphForTest(Rgb? top, Rgb? bottom) => GlyphFor(top, bottom);
 
     private void DrawOverlay()
     {
@@ -856,7 +829,7 @@ public sealed class CanvasView : View
                 ? term
                 : ToTerminal(otherY < _s.Canvas.Height && RenderColor(_s.Canvas[x, otherY]) is { } o
                     ? o
-                    : BackgroundShade(x, otherY));
+                    : CellMapping.BackgroundShade(x, otherY));
             SetAttribute(new Attribute(term, other));
             Move(x, row);
             AddRune(top ? '▀' : '▄');
@@ -890,7 +863,7 @@ public sealed class CanvasView : View
                 ? term
                 : ToTerminal(otherY < _s.Canvas.Height && RenderColor(_s.Canvas[x, otherY]) is { } o
                     ? o
-                    : BackgroundShade(x, otherY));
+                    : CellMapping.BackgroundShade(x, otherY));
             SetAttribute(new Attribute(term, other));
             Move(x, row);
             AddRune(top ? '▀' : '▄');
