@@ -95,4 +95,20 @@ public class BugRegressionTests
         s.AdjustBrush(-1); // skip 2 → 1
         Assert.That(s.BrushSize, Is.EqualTo(1), "descending past 2 lands on 1");
     }
+
+    // Bug: a black brush was invisible — the blink dimmed the color to 50%, and 50% of
+    // black is black. The blink now flips to the RGB inverse, so the flash always
+    // contrasts with the brush color itself (black↔white).
+    [Test]
+    public void Cursor_blink_inverts_color_so_black_is_visible()
+    {
+        var black = new Rgb(0, 0, 0);
+        Assert.Multiple(() =>
+        {
+            Assert.That(CanvasView.BlinkColor(black, 0), Is.EqualTo(black), "phase 0 shows the brush color");
+            Assert.That(CanvasView.BlinkColor(black, 1), Is.EqualTo(new Rgb(255, 255, 255)), "black blinks to white");
+            Assert.That(CanvasView.BlinkColor(new Rgb(255, 255, 255), 1), Is.EqualTo(black), "white blinks to black");
+            Assert.That(CanvasView.BlinkColor(new Rgb(64, 128, 255), 1), Is.EqualTo(new Rgb(191, 127, 0)), "inverse is per-channel");
+        });
+    }
 }

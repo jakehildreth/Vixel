@@ -885,10 +885,11 @@ public sealed class CanvasView : View
                 break;
         }
 
-        // Transient pixels flash like the cursor: full color ↔ 50% dim.
+        // Transient pixels flash like the cursor: full color ↔ its inverse. Inverse
+        // guarantees contrast against the brush color itself (black↔white), where dimming
+        // left a black cursor invisible on a black canvas.
         var rgb = _s.EffectiveColor is { } i ? _s.Palette.Colors[i] : new Rgb(255, 255, 255);
-        var shown = _s.BlinkPhase == 0 ? rgb : new Rgb((byte)(rgb.R / 2), (byte)(rgb.G / 2), (byte)(rgb.B / 2));
-        var term = ToTerminal(shown);
+        var term = ToTerminal(BlinkColor(rgb, _s.BlinkPhase));
 
         foreach (var ((x, row), (top, bottom)) in cells)
         {
@@ -908,12 +909,11 @@ public sealed class CanvasView : View
     private void DrawCursor()
     {
         // The brush renders its full footprint (N×N square or inscribed circle, centered
-        // on the cursor) flashing full color ↔ 50% dim. Covers pixels beneath (stamp-reveal).
+        // on the cursor) flashing full color ↔ its inverse. Covers pixels beneath (stamp-reveal).
         // Footprint pixels sharing a cell are rendered together — writing halves
         // independently would clobber the first half with the second's bg.
         var rgb = _s.EffectiveColor is { } i ? _s.Palette.Colors[i] : new Rgb(255, 255, 255);
-        var shown = _s.BlinkPhase == 0 ? rgb : new Rgb((byte)(rgb.R / 2), (byte)(rgb.G / 2), (byte)(rgb.B / 2));
-        var term = ToTerminal(shown);
+        var term = ToTerminal(BlinkColor(rgb, _s.BlinkPhase));
 
         var cells = new Dictionary<(int X, int Row), (bool Top, bool Bottom)>();
         foreach (var (px, py) in Tools.Footprint(_s.CursorX, _s.CursorY, _s.BrushSize, _s.CircleBrush))
@@ -949,6 +949,13 @@ public sealed class CanvasView : View
         }
         return new Color(rgb.R, rgb.G, rgb.B);
     }
+
+    /// <summary>Blink color for the cursor/overlay: the color itself on phase 0, its RGB
+    /// inverse on phase 1. Inverse is always maximally distant from the brush color, so the
+    /// flash reads on any canvas — a black brush blinks to white, fixing the old 50%-dim
+    /// blink that left black-on-black invisible. Pure; tested.</summary>
+    internal static Rgb BlinkColor(Rgb color, int phase) =>
+        phase == 0 ? color : new Rgb((byte)(255 - color.R), (byte)(255 - color.G), (byte)(255 - color.B));
 
     private static int PerimeterIndex(int x, int y, int width, int height)
     {
