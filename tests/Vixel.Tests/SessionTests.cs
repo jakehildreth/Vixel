@@ -109,12 +109,38 @@ public class SessionTests
     }
 
     [Test]
+    public void Help_scroll_x_clamps_at_zero_and_resets_on_enter()
+    {
+        var s = NewSession();
+        s.EnterHelp();
+        s.ScrollHelp(0, 12);
+        Assert.That(s.HelpScrollX, Is.EqualTo(12));
+        s.ScrollHelp(0, -20);
+        Assert.That(s.HelpScrollX, Is.EqualTo(0), "horizontal scroll clamps at the left edge");
+        s.ScrollHelp(0, 8);
+        s.EnterHelp();
+        Assert.That(s.HelpScrollX, Is.EqualTo(0), "re-entering help resets the horizontal offset");
+    }
+
+    [Test]
+    public void Help_scroll_raises_status_changed()
+    {
+        // #24: the view redraws on StatusChanged; if ScrollHelp stops raising it, help stops scrolling.
+        var s = NewSession();
+        var raised = 0;
+        s.StatusChanged += () => raised++;
+        s.EnterHelp();
+        s.ScrollHelp(1);
+        Assert.That(raised, Is.GreaterThanOrEqualTo(2), "EnterHelp + ScrollHelp must each raise StatusChanged");
+    }
+
+    [Test]
     public void HelpView_max_scroll_matches_line_count()
     {
         Assert.Multiple(() =>
         {
-            Assert.That(HelpView.MaxScroll(44), Is.EqualTo(1), "45 lines, 44-row viewport");
-            Assert.That(HelpView.MaxScroll(20), Is.EqualTo(25));
+            Assert.That(HelpView.MaxScroll(45), Is.EqualTo(1), "46 lines, 45-row viewport");
+            Assert.That(HelpView.MaxScroll(20), Is.EqualTo(26));
             Assert.That(HelpView.MaxScroll(100), Is.EqualTo(0), "viewport taller than content: no scroll");
         });
     }
