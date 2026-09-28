@@ -95,12 +95,21 @@ session.StatusChanged();
 HelpView? help = null;
 void SyncHelpView()
 {
-    if (session.CurrentMode == EditorSession.Mode.Help && help is null)
+    if (session.CurrentMode == EditorSession.Mode.Help)
     {
-        help = new HelpView(session);
-        window.Add(help);
+        if (help is null)
+        {
+            help = new HelpView(session);
+            window.Add(help);
+        }
+        else
+        {
+            // Already open: this StatusChanged is a scroll. Adding marks the view dirty
+            // on its own; an existing view needs an explicit invalidate to redraw.
+            help.SetNeedsDraw();
+        }
     }
-    else if (session.CurrentMode != EditorSession.Mode.Help && help is not null)
+    else if (help is not null)
     {
         window.Remove(help);
         help = null;
@@ -185,8 +194,14 @@ public sealed class EditorSession
 
     public Action? StatusChanged;
 
-    /// <summary>Help scroll offset (Mode.Help only).</summary>
+    /// <summary>Help vertical scroll offset in lines (Mode.Help only).</summary>
     public int HelpScroll;
+
+    /// <summary>Help horizontal scroll offset in columns (Mode.Help only).</summary>
+    public int HelpScrollX;
+
+    /// <summary>Lines per Space-page in help; HelpView sets this from its viewport height on draw.</summary>
+    public int HelpPageSize = 20;
 
     // --- command-line editing (Mode.Command) ---------------------------------
 
@@ -273,12 +288,14 @@ public sealed class EditorSession
         }
     }
 
-    /// <summary>Opens on-line help.</summary>
-    public void EnterHelp() { CurrentMode = Mode.Help; HelpScroll = 0; StatusChanged?.Invoke(); }
+    /// <summary>Opens on-line help at the top.</summary>
+    public void EnterHelp() { CurrentMode = Mode.Help; HelpScroll = 0; HelpScrollX = 0; StatusChanged?.Invoke(); }
 
-    public void ScrollHelp(int delta)
+    /// <summary>Scrolls help vertically (clamped at top; the view clamps the bottom) and horizontally (clamped at 0).</summary>
+    public void ScrollHelp(int deltaY, int deltaX = 0)
     {
-        HelpScroll = Math.Max(0, HelpScroll + delta); // max bound is viewport-dependent; the view clamps
+        HelpScroll = Math.Max(0, HelpScroll + deltaY); // max bound is viewport-dependent; the view clamps
+        HelpScrollX = Math.Max(0, HelpScrollX + deltaX);
         StatusChanged?.Invoke();
     }
 
@@ -755,9 +772,14 @@ public sealed class CanvasView : View
         {
             if (key == Key.J || key == Key.CursorDown) _s.ScrollHelp(1);
             else if (key == Key.K || key == Key.CursorUp) _s.ScrollHelp(-1);
+            else if (key == Key.CursorRight) _s.ScrollHelp(0, 4);
+            else if (key == Key.CursorLeft) _s.ScrollHelp(0, -4);
+            else if (key == Key.Enter) _s.ScrollHelp(1);
+            else if (key == Key.Space) _s.ScrollHelp(_s.HelpPageSize);
             else if (key == Key.G) _s.ScrollHelp(int.MinValue);            // g: top
             else if (key == Key.G.WithShift) _s.ScrollHelp(int.MaxValue);  // G: bottom
-            else _s.ExitHelp();
+            else if (key == Key.Esc || key == Key.Q) _s.ExitHelp();
+            // every other key is ignored — help stays open
             SetNeedsDraw();
             return true;
         }
@@ -1105,7 +1127,7 @@ public sealed class SplashView : View
     private Color ToTerm(Rgb rgb) => new(rgb.R, rgb.G, rgb.B);
 }
 
-/// <summary>On-line help: the full key + command reference. Scrolls with j/k/arrows; any other key closes.</summary>
+/// <summary>On-line help: the full key + command reference. Scrolls like less: j/k/arrows, Enter=line, Space=page; Esc/q closes.</summary>
 public sealed class HelpView : View
 {
     private static readonly string[] Lines =
@@ -1154,10 +1176,11 @@ public sealed class HelpView : View
         "  :star              open the GitHub repo",
         "  :help  <F1>        this help",
         "",
-        "Esc                exit PAINT / cancel / close this help",
+        "Esc  q              exit PAINT / cancel / close this help",
+        "j/k · arrows · Enter/Space  scroll this help (line / page / sideways)",
     ];
 
-    /// <summary>Max scroll given a viewport height (tested; the session clamps against this).</summary>
+    /// <summary>Max scroll given a viewport height (tested). The draw clamps the session value against this and writes it back.</summary>
     public static int MaxScroll(int viewportHeight) => Math.Max(0, Lines.Length - viewportHeight);
 
     private readonly EditorSession _s;
@@ -1173,15 +1196,20 @@ public sealed class HelpView : View
     protected override bool OnDrawingContent(DrawContext? context)
     {
         SetAttribute(new Attribute(Color.None, Color.None));
-        var scroll = Math.Min(_s.HelpScroll, MaxScroll(Viewport.Height));
+        _s.HelpPageSize = Math.Max(1, Viewport.Height - 1); // less-style: page overlaps by one line
+        // Clamp the bottom here, where the viewport is known, and write it back so the
+        // session never carries overshoot (scrolling past the end then back up desyncs).
+        var scroll = _s.HelpScroll = Math.Min(_s.HelpScroll, MaxScroll(Viewport.Height));
         var maxWidth = Lines.Max(l => l.Length);
         var originX = Math.Max(0, (Viewport.Width - maxWidth) / 2);
         for (var row = 0; row < Viewport.Height; row++)
         {
             var lineIndex = scroll + row;
             if (lineIndex >= Lines.Length) break;
+            var text = Lines[lineIndex];
+            if (_s.HelpScrollX >= text.Length) continue; // scrolled past the end of this line
             Move(originX, row);
-            AddStr(Lines[lineIndex]);
+            AddStr(text[_s.HelpScrollX..]);
         }
         return true;
     }
